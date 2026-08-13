@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / 前端
+node_modules/
+dist/
+.vite/
+
+# 数据与产物（运行时生成）
+data/
+!data/pipelines/.gitkeep
+
+# 密钥与环境配置
+.env
+.env.*
+*.pem
+secrets/
+
+# 系统
+.DS_Store
+*.log
