@@ -13,9 +13,8 @@ node_modules/
 dist/
 .vite/
 
-# 数据与产物（运行时生成）
+# 数据与产物（运行时生成，不入库）
 data/
-!data/pipelines/.gitkeep
 
 # 密钥与环境配置
 .env

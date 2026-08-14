@@ -4,7 +4,7 @@
 
 ## 文档
 
-- [项目功能文档（PRD v2.0）](docs/PRD.md)
+- [项目功能文档（PRD v2）](docs/PRD.md)
 - [原始需求](docs/REQUIREMENTS.md)
 
 ## 定位
@@ -14,4 +14,4 @@
 
 ## 状态
 
-文档已就绪，待启动 M1（执行器 + 目录收录 + FastAPI 骨架）。
+文档已就绪（PRD v2），M1 执行计划已定：批次 A 执行闭环骨架 + 批次 B youtube-dub 试点流水线，待开工。
