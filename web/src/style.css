@@ -423,3 +423,49 @@ pre.preview {
   color: var(--text);
   cursor: pointer;
 }
+
+/* 卡片内小按钮 */
+.mini-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mini-btn.primary {
+  background: rgba(77, 159, 255, 0.16);
+  border-color: rgba(77, 159, 255, 0.5);
+  color: var(--accent);
+}
+
+/* 运行记录筛选行 */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filter-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 9px 10px;
+  font-size: 14px;
+}
+
+.auto-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}

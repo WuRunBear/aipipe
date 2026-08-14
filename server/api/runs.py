@@ -74,13 +74,22 @@ def _step_to_dict(s: StepRun) -> dict:
 
 
 @router.get("/runs")
-def list_runs(pipeline_id: int | None = None, _user: str = AuthUser) -> list[dict]:
+def list_runs(
+    pipeline: int | None = Query(None, description="按流水线 id 筛选"),
+    _user: str = AuthUser,
+) -> list[dict]:
     with SessionLocal() as session:
         q = session.query(Run)
-        if pipeline_id is not None:
-            q = q.filter(Run.pipeline_id == pipeline_id)
+        if pipeline is not None:
+            q = q.filter(Run.pipeline_id == pipeline)
         runs = q.order_by(Run.created_at.desc()).limit(50).all()
-        return [_run_to_dict(r) for r in runs]
+        names = {p.id: p.name for p in session.query(Pipeline).all()}
+        result: list[dict] = []
+        for r in runs:
+            d = _run_to_dict(r)
+            d["pipeline_name"] = names.get(r.pipeline_id, f"#{r.pipeline_id}")
+            result.append(d)
+        return result
 
 
 @router.get("/runs/{run_id}")

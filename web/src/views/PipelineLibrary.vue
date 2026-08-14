@@ -61,6 +61,12 @@ onMounted(load)
         </span>
       </div>
       <p class="card-desc">{{ p.description || '（无描述）' }}</p>
+      <div style="display: flex; gap: 8px; margin-top: 10px">
+        <button class="mini-btn primary" @click.stop="router.push(`/pipelines/${p.id}`)">发起运行</button>
+        <button class="mini-btn" @click.stop="router.push({ path: '/runs', query: { pipeline: p.id } })">
+          运行记录
+        </button>
+      </div>
     </div>
     <div style="display: flex; gap: 10px; margin-top: 16px">
       <button class="btn ghost" :disabled="refreshing" @click="refresh">
