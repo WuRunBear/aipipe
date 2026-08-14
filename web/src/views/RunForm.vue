@@ -58,6 +58,11 @@ function submit() {
     })
 }
 
+function goBack() {
+  if (window.history.state && window.history.state.back) router.back()
+  else router.push('/')
+}
+
 function specOf(p) {
   return typeof p === 'object' && p ? p : {}
 }
@@ -68,7 +73,7 @@ onMounted(load)
 <template>
   <div>
     <div class="topbar">
-      <button class="back" @click="router.back()">‹</button>
+      <button class="back" @click="goBack">‹</button>
       <h1>发起运行</h1>
     </div>
     <div v-if="error" class="error-banner">{{ error }}</div>

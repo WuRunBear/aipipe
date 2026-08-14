@@ -1,4 +1,6 @@
 <script setup>
+defineOptions({ name: 'Settings' })
+
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, auth } from '../api'

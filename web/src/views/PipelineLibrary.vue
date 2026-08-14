@@ -1,5 +1,7 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+defineOptions({ name: 'PipelineLibrary' })
+
+import { onActivated, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../api'
 
@@ -32,7 +34,7 @@ async function refresh() {
   }
 }
 
-onMounted(load)
+onActivated(load)  // 首次挂载与从缓存激活时静默刷新（不重置 loading，避免闪烁）
 </script>
 
 <template>

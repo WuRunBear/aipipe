@@ -46,6 +46,30 @@ body {
 h1.page-title {
   font-size: 20px;
   margin: 4px 0 14px;
+  /* 固定顶部 */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  padding: 4px 14px 10px;
+  margin-left: -14px;
+  margin-right: -14px;
+}
+
+/* 标题+筛选等组合头部整体固定 */
+.sticky-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  margin: -4px -14px 6px;
+  padding: 4px 14px 8px;
+}
+
+.sticky-head .page-title {
+  position: static;
+  margin: 0 0 8px;
+  padding: 0;
 }
 
 h2.section-title {
@@ -324,12 +348,18 @@ h2.section-title {
   margin-bottom: 12px;
 }
 
-/* 顶栏（层级页返回） */
+/* 顶栏（层级页返回），固定顶部 */
 .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  margin: -4px -14px 12px;
+  padding: 4px 14px 8px;
 }
 
 .topbar .back {
@@ -363,6 +393,17 @@ h2.section-title {
 
 .kv .k { color: var(--muted); }
 .kv .v { overflow-wrap: anywhere; }
+
+/* 页面切换过渡 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.12s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
 
 /* 轮询指示 */
 .pulse { animation: pulse 1.2s ease-in-out infinite; }

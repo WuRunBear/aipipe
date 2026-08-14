@@ -89,6 +89,11 @@ function rerunFrom(stepIndex) {
     .catch((e) => (error.value = e.message))
 }
 
+function goBack() {
+  if (window.history.state && window.history.state.back) router.back()
+  else router.push('/runs')
+}
+
 onMounted(async () => {
   try {
     await loadRun()
@@ -111,7 +116,7 @@ onUnmounted(() => {
 <template>
   <div>
     <div class="topbar">
-      <button class="back" @click="router.push('/runs')">‹</button>
+      <button class="back" @click="goBack">‹</button>
       <h1>运行 {{ runId.slice(0, 8) }}</h1>
     </div>
     <div v-if="error" class="error-banner">{{ error }}</div>

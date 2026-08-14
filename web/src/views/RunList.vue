@@ -1,5 +1,7 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+defineOptions({ name: 'RunList' })
+
+import { onActivated, onDeactivated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, fmtTime, statusMeta } from '../api'
 
@@ -31,10 +33,11 @@ function changeFilter() {
   load()
 }
 
+// 从流水线库「运行记录」等带 query 进入：只更新选中值，激活时统一加载
 watch(
   () => route.query.pipeline,
   (v) => {
-    if (v !== selected.value) selected.value = String(v ?? '')
+    selected.value = String(v ?? '')
   }
 )
 
@@ -42,33 +45,45 @@ function tick() {
   if (autoRefresh.value) load()
 }
 
-onMounted(async () => {
+let lastSelected = null
+
+onActivated(async () => {
   selected.value = String(route.query.pipeline ?? '')
   try {
     pipelines.value = await api.listPipelines()
   } catch {
     /* 下拉可选，失败不阻塞列表 */
   }
-  load()
+  // 仅首次挂载或筛选变化时加载；返回/切 tab 保持缓存状态，由轮询更新
+  if (runs.value.length === 0 || selected.value !== lastSelected) await load()
+  lastSelected = selected.value
+  if (timer) clearInterval(timer)
   timer = setInterval(tick, 4000)
 })
 
-onUnmounted(() => clearInterval(timer))
+onDeactivated(() => {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+})
 </script>
 
 <template>
   <div>
-    <h1 class="page-title">运行记录</h1>
-    <div class="filter-row">
-      <select v-model="selected" class="filter-select" @change="changeFilter">
-        <option value="">全部流水线</option>
-        <option v-for="p in pipelines" :key="p.id" :value="p.id">
-          {{ p.name }}
-        </option>
-      </select>
-      <label class="auto-label">
-        <input v-model="autoRefresh" type="checkbox" /> 自动刷新
-      </label>
+    <div class="sticky-head">
+      <h1 class="page-title">运行记录</h1>
+      <div class="filter-row">
+        <select v-model="selected" class="filter-select" @change="changeFilter">
+          <option value="">全部流水线</option>
+          <option v-for="p in pipelines" :key="p.id" :value="p.id">
+            {{ p.name }}
+          </option>
+        </select>
+        <label class="auto-label">
+          <input v-model="autoRefresh" type="checkbox" /> 自动刷新
+        </label>
+      </div>
     </div>
     <div v-if="error" class="error-banner">{{ error }}</div>
     <div v-if="loading" class="empty">加载中…</div>

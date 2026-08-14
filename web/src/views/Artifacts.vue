@@ -7,6 +7,11 @@ const route = useRoute()
 const router = useRouter()
 const runId = route.params.id
 
+function goBack() {
+  if (window.history.state && window.history.state.back) router.back()
+  else router.push(`/runs/${runId}`)
+}
+
 const artifacts = ref([])
 const loading = ref(true)
 const error = ref('')
@@ -58,7 +63,7 @@ onMounted(load)
 <template>
   <div>
     <div class="topbar">
-      <button class="back" @click="router.push(`/runs/${runId}`)">‹</button>
+      <button class="back" @click="goBack">‹</button>
       <h1>产物</h1>
     </div>
     <div v-if="error" class="error-banner">{{ error }}</div>

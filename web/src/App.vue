@@ -4,12 +4,21 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const showTabs = computed(() => !route.meta?.fullscreen)
+
+// keep-alive 缓存常驻页，返回/切换 tab 不重新加载
+const keepAliveViews = ['PipelineLibrary', 'RunList', 'Settings']
 </script>
 
 <template>
   <div class="app">
     <main class="page">
-      <router-view />
+      <router-view v-slot="{ Component, route: r }">
+        <transition name="fade" mode="out-in">
+          <keep-alive :include="keepAliveViews">
+            <component :is="Component" :key="r.path" />
+          </keep-alive>
+        </transition>
+      </router-view>
     </main>
     <nav v-if="showTabs" class="tabbar">
       <router-link to="/" class="tab" :class="{ active: route.path === '/' }">
