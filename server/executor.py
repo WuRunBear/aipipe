@@ -102,8 +102,14 @@ async def docker_run(
     secrets: dict[str, str],
     timeout: int,
     log_path: Path,
+    proxy: str | None = None,
 ) -> int:
-    """执行一次受控 docker run，输出流式写日志文件，返回退出码。"""
+    """执行一次受控 docker run，输出流式写日志文件，返回退出码。
+
+    proxy: pipeline.yaml 可声明，仅对该流水线的容器注入代理环境变量并
+    使用 host 网络（不改系统环境，不影响其他流水线）。host 网络使容器
+    可直接访问宿主机的 127.0.0.1:7890 代理。
+    """
     env_lines = []
     env_lines.append("HOME=/tmp")
     env_lines.append("PYTHONDONTWRITEBYTECODE=1")
@@ -111,6 +117,17 @@ async def docker_run(
     env_lines.append("PATH=/tmp/.local/bin:/usr/local/bin:/usr/bin:/bin")
     env_lines.extend(f"{k}={v}" for k, v in extra_env.items())
     env_lines.extend(f"{k}={v}" for k, v in secrets.items())
+
+    proxy_url = None
+    use_host_net = False
+    if proxy:
+        proxy_url = proxy
+        use_host_net = True
+        for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env_lines.append(f"{k}={proxy_url}")
+        env_lines.append("NO_PROXY=localhost,127.0.0.1,.local")
+        env_lines.append("no_proxy=localhost,127.0.0.1,.local")
+
     secrets_env = run_dir / "secrets.env"
     secrets_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
 
@@ -126,9 +143,10 @@ async def docker_run(
         "-v", f"{pipeline_dir}:/pipeline:ro",
         "-v", f"{workdir}:/work", "-w", "/work",
         "-v", f"{PIP_CACHE_DIR}:/tmp/.cache/pip",
-        "--env-file", str(secrets_env),
-        image,
     ]
+    if use_host_net:
+        base_cmd += ["--network", "host"]
+    base_cmd += ["--env-file", str(secrets_env), image]
     proc = await asyncio.create_subprocess_exec(
         *base_cmd, *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -269,6 +287,7 @@ async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
                     secrets=secrets,
                     timeout=timeout,
                     log_path=log_path,
+                    proxy=manifest.get("proxy"),
                 )
             except Exception as e:  # noqa: BLE001  docker 启动等致命错误
                 log.exception("run %s 步骤 %s 执行异常", run_id, step_file)

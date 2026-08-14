@@ -29,18 +29,16 @@ def translate(max_retries: int = 5) -> str:
     for attempt in range(1, max_retries + 1):
         try:
             resp = client.chat.completions.create(
-                model=os.environ.get("TRANSLATE_MODEL", "gpt-4o-mini"),
+                model=os.environ.get("TRANSLATE_MODEL", "deepseek-chat"),
                 messages=[
                     {"role": "system", "content": SYSTEM},
                     {"role": "user", "content": PROMPT},
                 ],
             )
             text = (resp.choices[0].message.content or "").strip()
-            # 完整性校验：非空、与源文本规模相近（拒绝漏翻/截断）
+            # 完整性校验：非空即视为有效（不同语言字符密度差异大，不做长度比例判断）
             if not text:
                 raise ValueError("译文为空")
-            if len(text) < len(transcript) * 0.3:
-                raise ValueError(f"译文过短（{len(text)} vs 源 {len(transcript)}），疑似截断")
             return text
         except Exception as e:  # noqa: BLE001
             last = e

@@ -14,6 +14,11 @@ r = subprocess.run(
         "yt-dlp",
         "-f", "bv*+ba/b",
         "--merge-output-format", "mp4",
+        "--write-auto-subs",
+        "--write-subs",
+        "--sub-format", "vtt",
+        "--sub-langs", "en,zh-Hans,zh-Hant,ja,ko,es,fr,de,ru,pt,ar,hi,id,th,vi",
+        "--write-info-json",
         "-o", "/work/video.%(ext)s",
         "--no-playlist",
         url,
@@ -26,7 +31,13 @@ if r.returncode != 0:
     print(r.stderr[-2000:])
     raise SystemExit(f"下载失败（exit {r.returncode}）")
 
-videos = sorted(glob.glob("/work/video.*"))
+# 排除字幕(.vtt)与元数据(.info.json)，优先 mp4（--merge-output-format 保证合并产物）
+videos = [p for p in glob.glob("/work/video.*") if p.endswith(".mp4")]
+if not videos:
+    videos = [
+        p for p in glob.glob("/work/video.*")
+        if not p.endswith(".vtt") and not p.endswith(".info.json")
+    ]
 if not videos:
     raise SystemExit("未找到下载产物 video.*")
 src = Path(videos[0])
