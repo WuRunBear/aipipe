@@ -15,6 +15,8 @@ DATA_DIR = Path(os.environ.get("AIPIPE_DATA_DIR", REPO_ROOT / "data")).resolve()
 SECRETS_ENV = Path(
     os.environ.get("AIPIPE_SECRETS_ENV", DATA_DIR / "secrets" / "restricted.env")
 )
+# 全局密钥模板：部署时复制为 SECRETS_ENV 后填写（见 docs/restricted.env.example）
+SECRETS_ENV_TEMPLATE = REPO_ROOT / "docs" / "restricted.env.example"
 DB_URL = os.environ.get("AIPIPE_DB_URL", f"sqlite:///{DATA_DIR / 'aipipe.db'}")
 
 # 默认资源限额（可被 pipeline.yaml 的 resources 字段覆盖）

@@ -66,15 +66,18 @@ curl -sN "http://127.0.0.1:8000/runs/<id>/logs/stream?token=$TOKEN"   # SSE 走 
 
 ## 5. 密钥配置（youtube-dub 需要）
 
-`data/secrets/restricted.env`（gitignore）：
+`data/secrets/restricted.env` 为**全局受限 Key 仓库**（gitignore 不入库），
+各流水线按其 pipeline.yaml 的 `env:` 声明筛选注入（见 executor.read_secrets）。
+通用模板 `docs/restricted.env.example`（入 git）：部署时复制后填写，
+缺失时执行器会自动从模板创建（`_ensure_secrets_file`）。
 
 ```bash
-OPENAI_API_KEY=<DeepSeek 受限 Key>
-OPENAI_BASE_URL=https://api.deepseek.com/v1
+cp docs/restricted.env.example data/secrets/restricted.env
+# 填入受限 Key 后：
+# OPENAI_API_KEY=<DeepSeek 受限 Key>
+# OPENAI_BASE_URL=https://api.deepseek.com/v1
 # TRANSLATE_MODEL=deepseek-chat
 ```
-
-仅 pipeline.yaml 的 `env:` 声明会被注入容器。
 
 ## 6. 网络环境约束（重要）
 

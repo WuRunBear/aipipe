@@ -22,11 +22,18 @@ docker build -t aipipe/base:py311-ffmpeg images/base
 # 2. 构建前端
 cd web && npm install && npm run build && cd ..
 
-# 3. 安装依赖并启动
+# 3. 安装依赖
 pip install -r server/requirements.txt
+
+# 4. 创建全局受限密钥文件（通用模板；缺失时执行器会自动创建，但需填真实 Key）
+cp docs/restricted.env.example data/secrets/restricted.env
+# 编辑 data/secrets/restricted.env 填入受限 Key（如 OPENAI_API_KEY）
+# 注：restricted.env 为全局仓库，各流水线按自身 env: 声明筛选注入
+
+# 5. 启动（HTTPS 反代时 bind 127.0.0.1）
 AIPIPE_JWT_SECRET=<固定随机串> python3 -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 
-# 4. 首次访问 / 会进入"设置密码"页面；随后所有操作需登录
+# 6. 首次访问 / 会进入"设置密码"页面；随后所有操作需登录
 ```
 
 ## HTTPS 反代（Caddy 示例）

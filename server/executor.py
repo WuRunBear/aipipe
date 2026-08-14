@@ -21,6 +21,7 @@ from .config import (
     DEFAULT_TIMEOUT,
     PIP_CACHE_DIR,
     SECRETS_ENV,
+    SECRETS_ENV_TEMPLATE,
 )
 from .models import Run, SessionLocal, StepRun, get_settings, utcnow
 
@@ -73,12 +74,16 @@ def env_name(key: str) -> str:
 
 
 def read_secrets(manifest: dict) -> dict:
-    """从 restricted.env 读取并按清单 env: 声明筛选；缺失项记 warning。"""
+    """从 restricted.env 读取并按清单 env: 声明筛选；缺失项记 warning。
+
+    restricted.env 是全局受限 Key 仓库；首次缺文件时自动从模板复制（部署防漏建）。
+    """
     declared = [k for k in (manifest.get("env") or []) if isinstance(k, str)]
     if not declared:
         return {}
     if not SECRETS_ENV.is_file():
-        log.warning("清单声明了 env 但 %s 不存在，跳过 Key 注入", SECRETS_ENV)
+        _ensure_secrets_file()
+        log.warning("清单声明了 env 但 %s 不存在，已从模板初始化，请填入真实 Key", SECRETS_ENV)
         return {}
     found: dict[str, str] = {}
     for line in SECRETS_ENV.read_text(encoding="utf-8").splitlines():
@@ -92,6 +97,15 @@ def read_secrets(manifest: dict) -> dict:
         if key not in found:
             log.warning("清单声明 env:%s 但 restricted.env 中缺失", key)
     return found
+
+
+def _ensure_secrets_file() -> None:
+    """restricted.env 不存在时从全局模板复制空文件（不覆盖已存在的）。"""
+    if not SECRETS_ENV_TEMPLATE.is_file():
+        return
+    SECRETS_ENV.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SECRETS_ENV_TEMPLATE, SECRETS_ENV)
+    log.info("已从模板创建 %s（待填写真实 Key）", SECRETS_ENV)
 
 
 async def docker_run(
