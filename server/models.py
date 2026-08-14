@@ -1,4 +1,4 @@
-"""SQLite/SQLAlchemy 数据模型（M1 最小集：pipelines / runs / step_runs）。"""
+"""SQLite/SQLAlchemy 数据模型（M3：pipelines / runs / step_runs / settings）。"""
 import datetime
 import uuid
 
@@ -58,6 +58,25 @@ class StepRun(Base):
     log_path: Mapped[str] = mapped_column(String, default="")
     started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Setting(Base):
+    """单行配置（PRD §5 settings）：Webhook URL、登录密码哈希。"""
+    __tablename__ = "settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # 恒为 1
+    webhook_url: Mapped[str] = mapped_column(String, default="")
+    password_hash: Mapped[str] = mapped_column(String, default="")  # bcrypt；空=未初始化
+
+
+def get_settings(session) -> Setting:
+    """取单行 settings，不存在则创建。"""
+    s = session.get(Setting, 1)
+    if s is None:
+        s = Setting(id=1)
+        session.add(s)
+        session.commit()
+    return s
 
 
 def init_db() -> None:

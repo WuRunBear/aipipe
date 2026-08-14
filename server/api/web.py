@@ -1,10 +1,11 @@
-"""系统信息 + 前端静态托管（M2）。"""
+"""系统信息 + 前端静态托管（M2/M3）。"""
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, PlainTextResponse
 
+from ..auth import AuthUser
 from ..config import REPO_ROOT, SECRETS_ENV
 from ..models import Pipeline, Run, SessionLocal
 
@@ -14,7 +15,7 @@ WEB_DIST = REPO_ROOT / "web" / "dist"
 
 
 @router.get("/system/info")
-def system_info() -> dict:
+def system_info(_user: str = AuthUser) -> dict:
     """设置页用：运行环境只读状态（不泄露 Key 值本身）。"""
     secrets_configured = False
     if SECRETS_ENV.is_file():

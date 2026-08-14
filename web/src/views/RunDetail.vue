@@ -81,6 +81,14 @@ function fullLogs() {
   window.open(api.logsUrl(runId), '_blank')
 }
 
+function rerunFrom(stepIndex) {
+  if (!confirm(`从第 ${stepIndex} 步重新运行？（会复制本运行的工作目录，产物保留）`)) return
+  api
+    .rerun(runId, stepIndex)
+    .then((r) => router.push(`/runs/${r.id}`))
+    .catch((e) => (error.value = e.message))
+}
+
 onMounted(async () => {
   try {
     await loadRun()
@@ -129,6 +137,14 @@ onUnmounted(() => {
       <div v-for="s in steps" :key="s.id" class="step">
         <span class="dot" :class="'dot-' + s.status"></span>
         <span class="name">{{ s.step_name }}</span>
+        <button
+          v-if="s.step_index > 1"
+          class="rerun-btn"
+          title="从该步骤重跑（复用已有产物）"
+          @click="rerunFrom(s.step_index)"
+        >
+          从第 {{ s.step_index }} 步重跑
+        </button>
         <span class="meta">
           <template v-if="s.exit_code !== null">{{ s.exit_code === -99 ? '超时' : `exit ${s.exit_code}` }}</template>
           <template v-else-if="s.status === 'running'">运行中</template>

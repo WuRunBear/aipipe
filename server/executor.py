@@ -2,10 +2,14 @@
 
 每次 run 在 `DATA_DIR/runs/<run_id>/` 下建 `work/`（唯一可写）与 `logs/`，
 逐步骤执行受控 `docker run`；上一步非零退出即终止，并标记失败步骤。
+M3：支持从第 N 步重跑（work 复制），终态发 Webhook 通知。
 """
 import asyncio
+import json
 import logging
 import shlex
+import shutil
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -18,7 +22,7 @@ from .config import (
     PIP_CACHE_DIR,
     SECRETS_ENV,
 )
-from .models import Run, SessionLocal, StepRun, utcnow
+from .models import Run, SessionLocal, StepRun, get_settings, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -219,10 +223,18 @@ async def ensure_image(image: str, pipeline_dir: Path) -> None:
         raise ExecutorError(f"镜像构建失败（exit {rc}）：{image}，日志见 {log_path}")
 
 
-async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
+async def run_pipeline(
+    run_id: str,
+    pipeline,
+    params: dict,
+    from_step: int = 1,
+    work_source: Path | None = None,
+) -> None:
     """执行整条流水线（后台任务入口）。
 
     run_id: 已入库的 Run.id；pipeline: 已入库的 Pipeline 记录；params: 已校验参数。
+    from_step: 从第 N 步开始（1-based，前面步骤不执行）；work_source: 复制该 run 的
+    work/ 作为本次初始工作目录（rerun 断点续跑用）。
     """
     manifest = yaml.safe_load(pipeline.manifest_json) or {}
     steps: list[str] = manifest["steps"]
@@ -234,6 +246,8 @@ async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
     logs_dir = rdir / "logs"
     workdir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
+    if work_source is not None and work_source.is_dir() and work_source != workdir:
+        _copy_work(work_source, workdir)
     # 容器以 uid 1000 运行，需对工作目录可写
     workdir.chmod(0o777)
     PIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -251,11 +265,14 @@ async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
     try:
         await ensure_image(pipeline.image, pipeline_dir)
     except ExecutorError as e:
-        _fail_run(run_id, str(e))
+        await _fail_run(run_id, str(e), pipeline)
         return
 
     try:
         for idx, step_file in enumerate(steps, start=1):
+            if idx < from_step:
+                log.info("run %s 跳过步骤 %d/%d: %s（from_step=%d）", run_id, idx, len(steps), step_file, from_step)
+                continue
             container_name = f"aipipe-{run_id[:12]}-{idx:02d}"
             log_path = logs_dir / f"{idx:02d}_{step_file.removesuffix('.py')}.log"
 
@@ -292,18 +309,18 @@ async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
             except Exception as e:  # noqa: BLE001  docker 启动等致命错误
                 log.exception("run %s 步骤 %s 执行异常", run_id, step_file)
                 _finish_step(step_run_id, "failed", -1)
-                _fail_run(run_id, f"步骤 {step_file} 执行异常: {e}")
+                await _fail_run(run_id, f"步骤 {step_file} 执行异常: {e}", pipeline)
                 return
 
             if rc == 0:
                 _finish_step(step_run_id, "success", 0)
             elif rc == TIMEOUT_RC:
                 _finish_step(step_run_id, "failed", TIMEOUT_RC)
-                _fail_run(run_id, f"步骤 {step_file} 超时（>{timeout}s）")
+                await _fail_run(run_id, f"步骤 {step_file} 超时（>{timeout}s）", pipeline)
                 return
             else:
                 _finish_step(step_run_id, "failed", rc)
-                _fail_run(run_id, f"步骤 {step_file} 失败（exit {rc}）")
+                await _fail_run(run_id, f"步骤 {step_file} 失败（exit {rc}）", pipeline)
                 return
 
         with SessionLocal() as session:
@@ -312,9 +329,32 @@ async def run_pipeline(run_id: str, pipeline, params: dict) -> None:
             run.finished_at = utcnow()
             session.commit()
         log.info("run %s 全部步骤成功", run_id)
+        await notify_webhook(run_id, pipeline, "success", "")
     except Exception as e:  # noqa: BLE001 兜底
         log.exception("run %s 异常终止", run_id)
-        _fail_run(run_id, f"未预期错误: {e}")
+        await _fail_run(run_id, f"未预期错误: {e}", pipeline)
+
+
+def _copy_work(source: Path, dest: Path) -> None:
+    """复制源 run 的工作目录内容到本次 run（rerun 断点续跑）。
+
+    容器以 uid 1000 运行，复制后属主变为宿主用户 → 放开读写权限
+    （与 work/ 目录 chmod 777 的设计一致）。
+    """
+    for item in source.iterdir():
+        target = dest / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+            _chmod_tree(target)
+        elif item.is_file():
+            shutil.copy2(item, target)
+            target.chmod(0o666)
+
+
+def _chmod_tree(root: Path) -> None:
+    root.chmod(0o777)
+    for p in root.rglob("*"):
+        p.chmod(0o777 if p.is_dir() else 0o666)
 
 
 def _finish_step(step_run_id: int, status: str, exit_code: int) -> None:
@@ -326,7 +366,7 @@ def _finish_step(step_run_id: int, status: str, exit_code: int) -> None:
         session.commit()
 
 
-def _fail_run(run_id: str, message: str) -> None:
+async def _fail_run(run_id: str, message: str, pipeline) -> None:
     log.warning("run %s 失败: %s", run_id, message)
     with SessionLocal() as session:
         run = session.get(Run, run_id)
@@ -334,3 +374,42 @@ def _fail_run(run_id: str, message: str) -> None:
         run.error = message
         run.finished_at = utcnow()
         session.commit()
+    await notify_webhook(run_id, pipeline, "failed", message)
+
+
+async def notify_webhook(run_id: str, pipeline, status: str, error: str) -> None:
+    """终态通知：向 settings 配置的 webhook_url POST JSON（失败仅记日志）。"""
+    with SessionLocal() as session:
+        settings = get_settings(session)
+        url = settings.webhook_url.strip()
+    if not url:
+        return
+    with SessionLocal() as session:
+        run = session.get(Run, run_id)
+        payload = {
+            "event": "run.finished",
+            "run_id": run_id,
+            "pipeline_id": pipeline.id,
+            "pipeline_name": pipeline.name,
+            "status": status,
+            "error": error,
+            "params": json.loads(run.params_json or "{}") if run else {},
+            "started_at": run.started_at.isoformat() if run and run.started_at else None,
+            "finished_at": run.finished_at.isoformat() if run and run.finished_at else None,
+        }
+    try:
+        await asyncio.to_thread(_post_webhook, url, payload)
+        log.info("webhook 通知成功: %s", url)
+    except Exception:  # noqa: BLE001
+        log.warning("webhook 通知失败: %s", url, exc_info=True)
+
+
+def _post_webhook(url: str, payload: dict) -> None:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        resp.read()

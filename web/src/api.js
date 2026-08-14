@@ -1,7 +1,34 @@
 const API_BASE = ''
+const TOKEN_KEY = 'aipipe_token'
+
+export const auth = {
+  get token() {
+    return localStorage.getItem(TOKEN_KEY) || ''
+  },
+  set token(v) {
+    if (v) localStorage.setItem(TOKEN_KEY, v)
+    else localStorage.removeItem(TOKEN_KEY)
+  },
+  headers() {
+    const t = this.token
+    return t ? { Authorization: `Bearer ${t}` } : {}
+  },
+}
+
+function isAuthError(status) {
+  return status === 401
+}
 
 async function request(path, options) {
-  const res = await fetch(API_BASE + path, options)
+  const res = await fetch(API_BASE + path, {
+    ...options,
+    headers: { ...(options?.headers || {}), ...auth.headers() },
+  })
+  if (isAuthError(res.status)) {
+    auth.token = ''
+    if (!location.hash.startsWith('#/login')) location.hash = '#/login'
+    throw new Error('登录已失效，请重新登录')
+  }
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -15,27 +42,42 @@ async function request(path, options) {
   return res.json()
 }
 
+function post(path, data) {
+  return request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
 export const api = {
+  authStatus: () => request('/auth/status'),
+  setup: (password) => post('/auth/setup', { password }),
+  login: (password) => post('/auth/login', { password }),
   listPipelines: () => request('/pipelines'),
   getPipeline: (id) => request(`/pipelines/${id}`),
   refreshPipelines: () => request('/pipelines/refresh', { method: 'POST' }),
-  createRun: (id, params) =>
-    request(`/pipelines/${id}/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ params }),
-    }),
+  createRun: (id, params) => post(`/pipelines/${id}/runs`, { params }),
   listRuns: (pipelineId) =>
     request('/runs' + (pipelineId ? `?pipeline=${pipelineId}` : '')),
   getRun: (id) => request(`/runs/${id}`),
+  rerun: (id, fromStep) =>
+    request(`/runs/${id}/rerun?from_step=${fromStep}`, { method: 'POST' }),
   logsUrl: (id) => `${API_BASE}/runs/${id}/logs`,
-  streamUrl: (id) => `${API_BASE}/runs/${id}/logs/stream`,
+  streamUrl: (id) =>
+    `${API_BASE}/runs/${id}/logs/stream?token=${encodeURIComponent(auth.token)}`,
   listArtifacts: (id) => request(`/runs/${id}/artifacts`),
   artifactDownloadUrl: (id, path) =>
     `${API_BASE}/runs/${id}/artifacts/download?path=${encodeURIComponent(path)}`,
   previewArtifact: (id, path) =>
     request(`/runs/${id}/artifacts/preview?path=${encodeURIComponent(path)}`),
   systemInfo: () => request('/system/info'),
+  getSettings: () => request('/settings'),
+  updateSettings: (body) => request('/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
 }
 
 export function fmtSize(bytes) {

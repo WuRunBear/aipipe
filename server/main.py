@@ -1,12 +1,14 @@
-"""FastAPI 应用装配（M2：无认证，bind localhost；认证归 M3）。"""
+"""FastAPI 应用装配（M3：全站鉴权，认证/健康检查/静态页面白名单）。"""
 import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .api import artifacts as artifacts_api
+from .api import auth as auth_api
 from .api import pipelines as pipelines_api
 from .api import runs as runs_api
+from .api import settings as settings_api
 from .api import web as web_api
 from .config import DATA_DIR, PIPELINES_DIR
 from .models import init_db
@@ -14,11 +16,13 @@ from .registry import scan_pipelines
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-app = FastAPI(title="aipipe", version="0.2.0")
+app = FastAPI(title="aipipe", version="0.3.0")
 
+app.include_router(auth_api.router)
 app.include_router(pipelines_api.router)
 app.include_router(runs_api.router)
 app.include_router(artifacts_api.router)
+app.include_router(settings_api.router)
 app.include_router(web_api.router)
 
 # 前端构建产物（web/dist/assets），未构建时 / 会提示

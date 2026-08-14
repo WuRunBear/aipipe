@@ -1,4 +1,4 @@
-"""产物 API：列表 / 下载 / 预览（M2）。
+"""产物 API：列表 / 下载 / 预览（M2，M3 起全站鉴权）。
 
 产物以 `data/runs/<run_id>/work/` 为唯一事实来源，动态扫描（不建表，
 避免目录与表双源漂移；运行中即可查看部分产物）。
@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from ..auth import AuthUser
 from ..executor import run_dir
 from ..models import Run, SessionLocal
 
@@ -76,14 +77,15 @@ def _scan_artifacts(run_id: str) -> list[dict]:
 
 
 @router.get("/runs/{run_id}/artifacts")
-def list_artifacts(run_id: str) -> dict:
+def list_artifacts(run_id: str, _user: str = AuthUser) -> dict:
     _ensure_run(run_id)
     return {"artifacts": _scan_artifacts(run_id)}
 
 
 @router.get("/runs/{run_id}/artifacts/download")
 def download_artifact(
-    run_id: str, path: str = Query(..., description="work/ 下相对路径")
+    run_id: str, path: str = Query(..., description="work/ 下相对路径"),
+    _user: str = AuthUser,
 ) -> FileResponse:
     _ensure_run(run_id)
     target = _safe_work_path(run_id, path)
@@ -92,7 +94,7 @@ def download_artifact(
 
 
 @router.get("/runs/{run_id}/artifacts/preview")
-def preview_artifact(run_id: str, path: str = Query(...)) -> dict:
+def preview_artifact(run_id: str, path: str = Query(...), _user: str = AuthUser) -> dict:
     """文本类产物返回前 200KB；二进制返回提示。"""
     _ensure_run(run_id)
     target = _safe_work_path(run_id, path)

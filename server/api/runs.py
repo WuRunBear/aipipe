@@ -3,9 +3,10 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from ..auth import AuthUser, AuthUserAny
 from ..config import DATA_DIR
 from ..executor import ParamsError, run_pipeline, validate_params
 from ..models import Pipeline, Run, SessionLocal, StepRun
@@ -19,7 +20,7 @@ _tasks: set[asyncio.Task] = set()
 
 
 @router.post("/pipelines/{pipeline_id}/runs")
-async def create_run(pipeline_id: int, body: dict | None = None) -> dict:
+async def create_run(pipeline_id: int, body: dict | None = None, _user: str = AuthUser) -> dict:
     body = body or {}
     params = body.get("params") or {}
     with SessionLocal() as session:
@@ -73,7 +74,7 @@ def _step_to_dict(s: StepRun) -> dict:
 
 
 @router.get("/runs")
-def list_runs(pipeline_id: int | None = None) -> list[dict]:
+def list_runs(pipeline_id: int | None = None, _user: str = AuthUser) -> list[dict]:
     with SessionLocal() as session:
         q = session.query(Run)
         if pipeline_id is not None:
@@ -83,7 +84,7 @@ def list_runs(pipeline_id: int | None = None) -> list[dict]:
 
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: str) -> dict:
+def get_run(run_id: str, _user: str = AuthUser) -> dict:
     with SessionLocal() as session:
         run = session.get(Run, run_id)
         if run is None:
@@ -97,8 +98,51 @@ def get_run(run_id: str) -> dict:
         return {**_run_to_dict(run), "steps": [_step_to_dict(s) for s in steps]}
 
 
+@router.post("/runs/{run_id}/rerun")
+async def rerun_run(
+    run_id: str,
+    from_step: int = Query(1, ge=1, description="从第 N 步重跑（1-based）"),
+    _user: str = AuthUser,
+) -> dict:
+    """从指定步骤重跑：复制原 run 的 work/，复用已有产物断点续跑。"""
+    with SessionLocal() as session:
+        old = session.get(Run, run_id)
+        if old is None:
+            raise HTTPException(404, "运行不存在")
+        pipeline = session.get(Pipeline, old.pipeline_id)
+        if pipeline is None or pipeline.status != "active":
+            raise HTTPException(400, "流水线不可用")
+        manifest = load_manifest(Path(pipeline.source_dir))
+        steps: list[str] = manifest["steps"]
+        if not 1 <= from_step <= len(steps):
+            raise HTTPException(422, f"from_step 需在 1..{len(steps)} 之间")
+        params = json.loads(old.params_json or "{}")
+        run = Run(pipeline_id=pipeline.id, params_json=json.dumps(params))
+        session.add(run)
+        session.commit()
+        new_run_id = run.id
+
+    task = asyncio.create_task(
+        run_pipeline(
+            new_run_id, pipeline, params,
+            from_step=from_step,
+            work_source=_run_dir(run_id) / "work",
+        )
+    )
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return {
+        "id": new_run_id,
+        "status": "queued",
+        "pipeline_id": pipeline.id,
+        "params": params,
+        "from_step": from_step,
+        "source_run": run_id,
+    }
+
+
 @router.get("/runs/{run_id}/logs", response_class=PlainTextResponse)
-def get_run_logs(run_id: str) -> str:
+def get_run_logs(run_id: str, _user: str = AuthUser) -> str:
     """拼接全部步骤日志（纯文本）。"""
     logs_dir = _run_dir(run_id) / "logs"
     if not logs_dir.is_dir():
@@ -112,11 +156,12 @@ def get_run_logs(run_id: str) -> str:
 
 
 @router.get("/runs/{run_id}/logs/stream")
-async def stream_run_logs(run_id: str) -> StreamingResponse:
+async def stream_run_logs(run_id: str, _user: str = AuthUserAny) -> StreamingResponse:
     """SSE 实时日志流（M2）。
 
     事件：`log`（增量日志片段）、`status`（运行状态快照）、`done`（终态且已推完）。
     连接保持到运行结束；浏览器 EventSource 断线重连会从头推送，前端可清空重渲染。
+    token 因 EventSource 无法带 header，走 query 参数（见 require_auth_any）。
     """
     with SessionLocal() as session:
         if session.get(Run, run_id) is None:

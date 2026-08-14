@@ -379,3 +379,47 @@ pre.preview {
   overflow-x: auto;
   color: #c8d2e4;
 }
+
+/* 登录页 */
+.login-wrap {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px 22px;
+}
+
+.login-title {
+  margin: 0 0 2px;
+  font-size: 26px;
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.login-sub {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  margin: 0 0 18px;
+}
+
+/* rerun 小按钮 */
+.rerun-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--text);
+  cursor: pointer;
+}

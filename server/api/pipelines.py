@@ -1,8 +1,9 @@
-"""流水线 API：列表 / 收录刷新。"""
+"""流水线 API：列表 / 收录刷新（M3：全站鉴权）。"""
 import json
 
 from fastapi import APIRouter, HTTPException
 
+from ..auth import AuthUser
 from ..models import Pipeline, SessionLocal
 from ..registry import load_manifest, scan_pipelines
 
@@ -31,13 +32,13 @@ def _params_from_manifest(p: Pipeline) -> dict:
 
 
 @router.get("")
-def list_pipelines() -> list[dict]:
+def list_pipelines(_user: str = AuthUser) -> list[dict]:
     with SessionLocal() as session:
         return [_to_dict(p) for p in session.query(Pipeline).all()]
 
 
 @router.get("/{pipeline_id}")
-def get_pipeline(pipeline_id: int) -> dict:
+def get_pipeline(pipeline_id: int, _user: str = AuthUser) -> dict:
     with SessionLocal() as session:
         p = session.get(Pipeline, pipeline_id)
         if p is None:
@@ -46,5 +47,5 @@ def get_pipeline(pipeline_id: int) -> dict:
 
 
 @router.post("/refresh")
-def refresh_pipelines() -> dict:
+def refresh_pipelines(_user: str = AuthUser) -> dict:
     return {"pipelines": scan_pipelines()}
