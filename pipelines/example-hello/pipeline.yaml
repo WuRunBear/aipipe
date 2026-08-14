@@ -1,0 +1,10 @@
+name: example-hello
+description: 冒烟测试：无网络无 Key，验证收录→触发→执行→日志全链路
+image: aipipe/base:py311-ffmpeg
+timeout: 120
+params:
+  greeting: {type: string, default: "world"}
+steps:
+  - 01_hello.py
+  - 02_count.py
+  - 03_final.py

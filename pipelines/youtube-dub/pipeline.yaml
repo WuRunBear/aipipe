@@ -1,0 +1,15 @@
+name: youtube-dub
+description: 下载视频 → 转写 → 翻译 → TTS 配音 → 合并
+image: aipipe/base:py311-ffmpeg
+pip: [yt-dlp, "openai<3", edge-tts]
+env: [OPENAI_API_KEY, OPENAI_BASE_URL]
+timeout: 900
+params:
+  video_url:   {type: string, required: true}
+  target_lang: {type: string, default: "zh"}
+steps:
+  - 01_download.py
+  - 02_transcribe.py
+  - 03_translate.py
+  - 04_tts.py
+  - 05_merge.py

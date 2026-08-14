@@ -19,6 +19,7 @@ data/
 # 密钥与环境配置
 .env
 .env.*
+!.env.example
 *.pem
 secrets/
 
