@@ -1,10 +1,10 @@
-"""运行 API：触发 / 查状态 / 读日志（M1 纯文本；SSE 归 M2）。"""
+"""运行 API：触发 / 查状态 / 读日志（纯文本 + SSE）。"""
 import asyncio
 import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from ..config import DATA_DIR
 from ..executor import ParamsError, run_pipeline, validate_params
@@ -109,3 +109,54 @@ def get_run_logs(run_id: str) -> str:
             chunks.append(f"===== {log_path.name} =====\n")
             chunks.append(log_path.read_text(encoding="utf-8", errors="replace"))
     return "\n".join(chunks)
+
+
+@router.get("/runs/{run_id}/logs/stream")
+async def stream_run_logs(run_id: str) -> StreamingResponse:
+    """SSE 实时日志流（M2）。
+
+    事件：`log`（增量日志片段）、`status`（运行状态快照）、`done`（终态且已推完）。
+    连接保持到运行结束；浏览器 EventSource 断线重连会从头推送，前端可清空重渲染。
+    """
+    with SessionLocal() as session:
+        if session.get(Run, run_id) is None:
+            raise HTTPException(404, "运行不存在")
+
+    async def gen():
+        offsets: dict[str, int] = {}
+        sent_terminal = False
+        while True:
+            logs_dir = _run_dir(run_id) / "logs"
+            with SessionLocal() as session:
+                run = session.get(Run, run_id)
+                status = run.status if run else "missing"
+                payload = {
+                    "status": status,
+                    "current_step": run.current_step if run else 0,
+                    "error": run.error if run else "",
+                }
+
+            if logs_dir.is_dir():
+                for log_path in sorted(logs_dir.iterdir()):
+                    if not log_path.is_file():
+                        continue
+                    name = log_path.name
+                    size = log_path.stat().st_size
+                    prev = offsets.get(name, 0)
+                    if size > prev:
+                        with log_path.open("rb") as f:
+                            f.seek(prev)
+                            data = f.read(64 * 1024)
+                        offsets[name] = prev + len(data)
+                        yield f"event: log\ndata: {json.dumps({'file': name, 'content': data.decode('utf-8', errors='replace')})}\n\n"
+
+            yield f"event: status\ndata: {json.dumps(payload)}\n\n"
+            if status in ("success", "failed", "missing"):
+                if not sent_terminal:
+                    sent_terminal = True
+                    yield "event: done\ndata: {}\n\n"
+                break
+            yield ": keep-alive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

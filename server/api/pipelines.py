@@ -1,8 +1,10 @@
 """流水线 API：列表 / 收录刷新。"""
+import json
+
 from fastapi import APIRouter, HTTPException
 
 from ..models import Pipeline, SessionLocal
-from ..registry import scan_pipelines
+from ..registry import load_manifest, scan_pipelines
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -19,6 +21,15 @@ def _to_dict(p: Pipeline) -> dict:
     }
 
 
+def _params_from_manifest(p: Pipeline) -> dict:
+    """从清单解析参数 schema（{name: {type, required, default}}）。"""
+    try:
+        manifest = json.loads(p.manifest_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return manifest.get("params") or {}
+
+
 @router.get("")
 def list_pipelines() -> list[dict]:
     with SessionLocal() as session:
@@ -31,7 +42,7 @@ def get_pipeline(pipeline_id: int) -> dict:
         p = session.get(Pipeline, pipeline_id)
         if p is None:
             raise HTTPException(404, "流水线不存在")
-        return _to_dict(p)
+        return {**_to_dict(p), "params": _params_from_manifest(p)}
 
 
 @router.post("/refresh")
