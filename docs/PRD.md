@@ -220,6 +220,8 @@ aipipe/
 
 ### 9.2 M1 执行计划
 
+> **状态：✅ 已完成（2026-08-14）**，验收 1~4 全部通过（详见下方"验收结果"）。
+
 分两批交付，每批可独立验证。**批次 A 无外部依赖**（不需要真实 Key/网络），**批次 B** 为真实试点流水线。
 
 **批次 A：M1 骨架**
@@ -234,31 +236,42 @@ aipipe/
 
 ```
 pipelines/youtube-dub/
-├── pipeline.yaml      # params: video_url, target_lang；env 声明 Key；timeout
+├── pipeline.yaml      # params: video_url, target_lang；env 声明 Key；proxy；timeout
 ├── requirements.txt   # yt-dlp, openai, edge-tts
 ├── .env.example
 └── steps/
-    ├── 01_download.py    # yt-dlp 按 PIPE_PARAM_VIDEO_URL 下载 → /work/video.mp4
-    ├── 02_transcribe.py  # Whisper 云 API 转写（无 GPU，走云 API）
+    ├── 01_download.py    # yt-dlp 下载视频+字幕(精选语言) → /work/video.mp4 + video.*.vtt
+    ├── 02_subtitles.py   # 解析字幕 VTT → /work/transcript.txt（优先原声语言）
     ├── 03_translate.py   # LLM 翻译（脚本内部自行重试/校验，平台不管）
-    ├── 04_tts.py         # edge-tts 生成配音
+    ├── 04_tts.py         # edge-tts 分段生成配音 → /work/dub.mp3
     └── 05_merge.py       # ffmpeg 合成成片 → /work/output.mp4
 ```
 
-默认选型：转写 = OpenAI Whisper API；翻译 = OpenAI 兼容接口；TTS = edge-tts（免费无需 Key）；下载 = yt-dlp。换厂商只改 Key/base_url，步骤结构不变。
+默认选型：**转录 = yt-dlp 下载字幕**（不依赖 Whisper 端点，实测可用）；翻译 = OpenAI 兼容接口（实测 DeepSeek）；TTS = edge-tts（免费无需 Key）；下载 = yt-dlp。换厂商只改 Key/base_url，步骤结构不变。
 
-**M1 验收标准**：
+> 实现偏离记录：原计划用 Whisper 云 API 转写，但用户无支持音频的端点且 DeepSeek 不支持 → 改用 yt-dlp 字幕方案。网络环境需代理（YouTube 被墙）：pipeline.yaml 新增 `proxy` 字段，仅该流水线的容器使用 host 网络注入代理环境变量（实测 `127.0.0.1:7890`）。
 
-1. `POST /pipelines/refresh` 后 example-hello 与 youtube-dub 均入库。
-2. curl 触发 example-hello 跑通，三步日志可读。
-3. 配好 `data/secrets/restricted.env` 后，curl 触发 youtube-dub 跑通一条真实视频，产物落 `/data/runs/<id>/work/`。
-4. 人为制造一步失败 → 状态正确标记、后续步骤不执行。
+**M1 验收标准（含实测结果）**：
+
+1. `POST /pipelines/refresh` 后 example-hello 与 youtube-dub 均入库。✅
+2. curl 触发 example-hello 跑通，三步日志可读。✅
+3. 配好 `data/secrets/restricted.env` 后，curl 触发 youtube-dub 跑通一条真实视频，产物落 `/data/runs/<id>/work/`。✅（测试视频 `jNQXAC9IVRw`，output.mp4 269KB）
+4. 人为制造一步失败 → 状态正确标记、后续步骤不执行。✅（步骤 2 置 `sys.exit(3)` 验证）
+
+**实测发现与修复**（已固化进代码）：
+
+- 容器内 `/work` 需 uid 1000 可写 → executor 创建后 `chmod 777`
+- `--tmpfs /tmp` 默认 `noexec` → pip 装的命令无法执行 → 加 `exec` 选项
+- pip `--user` 安装到 `/tmp/.local/bin` 不在 PATH → executor 注入 PATH
+- 代理：docker 桥无法直达宿主机代理（防火墙限制），`proxy` 流水线改用 host 网络
+- 基础镜像 apt 源换 USTC 镜像（本环境 deb.debian.org 限速严重）
+- yt-dlp 字幕下载用 `--sub-langs ".*"` 会触发 429 → 精选常用语言列表
 
 ### 9.3 里程碑
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| **M1 执行闭环** | 执行器 + 目录收录 + FastAPI 骨架 + youtube-dub 试点 | curl 触发一条真实流水线跑通，日志可看 |
+| **M1 执行闭环** ✅ | 执行器 + 目录收录 + FastAPI 骨架 + youtube-dub 试点 | curl 触发一条真实流水线跑通，日志可看 |
 | **M2 Web UI** | 移动端五页面 + SSE 日志 | 手机上完成"选流水线→填参→看执行→下载产物"全流程 |
 | **M3 打磨** | 认证、Webhook、CLI、从第 N 步重跑 | 公网部署可用，完成/失败有推送 |
 

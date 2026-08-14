@@ -14,4 +14,7 @@
 
 ## 状态
 
-文档已就绪（PRD v2），M1 执行计划已定：批次 A 执行闭环骨架 + 批次 B youtube-dub 试点流水线，待开工。
+- **M1 执行闭环：✅ 完成**（执行器 + 目录收录 + FastAPI 骨架 + youtube-dub 试点，验收全通过）
+- **M2 Web UI：待启动**（移动端五页面 + SSE 日志）
+
+交接说明见 [docs/HANDOFF.md](docs/HANDOFF.md)。
