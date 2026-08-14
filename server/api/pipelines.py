@@ -1,7 +1,7 @@
 """流水线 API：列表 / 收录刷新（M3：全站鉴权）。"""
-import json
-
 from fastapi import APIRouter, HTTPException
+
+import yaml
 
 from ..auth import AuthUser
 from ..models import Pipeline, SessionLocal
@@ -23,10 +23,15 @@ def _to_dict(p: Pipeline) -> dict:
 
 
 def _params_from_manifest(p: Pipeline) -> dict:
-    """从清单解析参数 schema（{name: {type, required, default}}）。"""
+    """从清单解析参数 schema（{name: {type, required, default}}）。
+
+    manifest_json 由 registry 以 YAML 形式（yaml.safe_dump）落库。
+    """
     try:
-        manifest = json.loads(p.manifest_json or "{}")
-    except json.JSONDecodeError:
+        manifest = yaml.safe_load(p.manifest_json or "{}")
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(manifest, dict):
         return {}
     return manifest.get("params") or {}
 
