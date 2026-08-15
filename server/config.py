@@ -24,8 +24,5 @@ DEFAULT_CPUS = os.environ.get("AIPIPE_DEFAULT_CPUS", "2")
 DEFAULT_MEMORY = os.environ.get("AIPIPE_DEFAULT_MEMORY", "4g")
 DEFAULT_TIMEOUT = int(os.environ.get("AIPIPE_DEFAULT_TIMEOUT", "600"))
 
-# docker 卷/镜像命名前缀
-PIP_CACHE_DIR = Path(
-    os.environ.get("AIPIPE_PIP_CACHE_DIR", DATA_DIR / "pip-cache")
-)  # 宿主路径 bind 挂载，容器内 uid 1000 需可写
+# docker 镜像命名前缀
 IMAGE_PREFIX = "aipipe"

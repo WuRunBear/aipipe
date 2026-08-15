@@ -70,3 +70,28 @@ server {
 - token 24h 过期；前端存 localStorage，SSE 以 query 参数携带（EventSource 限制）。
 - 若直接 bind `0.0.0.0` 暴露，务必先完成密码初始化，否则任何人可设置密码接管。
 - 运行代码是经用户在 opencode 中审阅固化的（见 PRD §7 威胁模型）；docker 沙箱防事故不防恶意代码。
+
+## 流水线镜像契约
+
+执行器只做沙箱约束（`--user 1000:1000 --read-only --tmpfs /tmp`、资源限额、挂载、`--gpus`），**不再注入 PATH/HOME 等运行环境变量**。流水线镜像 Dockerfile 负责声明：
+
+- `ENV HOME=/tmp`——`--read-only` 下 root `~` 不可写，HOME 必须指向 tmpfs `/tmp`
+- `ENV PYTHONDONTWRITEBYTECODE=1`（可选，避免写 `.pyc` 失败）
+- 依赖在 build 期 `pip install` 完毕（执行器不做运行期 pip install）
+- `ENV PATH` 含 Python 解释器与 CLI 工具路径（若 FROM 官方镜像通常已自带）
+
+`aipipe/base:py311` 已配好这些契约，作为可选的样板轻量底座；流水线也可 FROM 任意其他镜像（如 `pytorch/pytorch`），但需自行补回上述 ENV 才能在沙箱下跑通。
+
+## GPU 流水线（可选）
+
+清单声明 `gpu: true`（如 `pipelines/youtube-dub`）的流水线由执行器透传 `--gpus all`。
+宿主需先安装 `nvidia-container-toolkit`，否则该流水线首次 `docker run` 立即报错。
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
+# 验证：docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
+```
+
+无 GPU 的部署机可忽略本节，仅需不收录任何声明 `gpu: true` 的流水线即可。

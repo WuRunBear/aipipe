@@ -7,7 +7,6 @@ M3：支持从第 N 步重跑（work 复制），终态发 Webhook 通知。
 import asyncio
 import json
 import logging
-import shlex
 import shutil
 import urllib.request
 from pathlib import Path
@@ -19,7 +18,6 @@ from .config import (
     DEFAULT_CPUS,
     DEFAULT_MEMORY,
     DEFAULT_TIMEOUT,
-    PIP_CACHE_DIR,
     SECRETS_ENV,
     SECRETS_ENV_TEMPLATE,
 )
@@ -122,18 +120,21 @@ async def docker_run(
     timeout: int,
     log_path: Path,
     proxy: str | None = None,
+    gpu: bool = False,
 ) -> int:
     """执行一次受控 docker run，输出流式写日志文件，返回退出码。
 
     proxy: pipeline.yaml 可声明，仅对该流水线的容器注入代理环境变量并
     使用 host 网络（不改系统环境，不影响其他流水线）。host 网络使容器
     可直接访问宿主机的 127.0.0.1:7890 代理。
+    gpu: pipeline.yaml 声明 gpu: true 时透传 --gpus all；需宿主装好
+    nvidia-container-toolkit，否则 docker run 立即报错。
+
+    环境契约（HOME/PATH/PYTHONDONTWRITEBYTECODE 等）由镜像 Dockerfile 自行声明，
+    执行器不再兜底注入；镜像未声明则在 --read-only/--user 1000 下可能跑不通，
+    责任在镜像。
     """
     env_lines = []
-    env_lines.append("HOME=/tmp")
-    env_lines.append("PYTHONDONTWRITEBYTECODE=1")
-    env_lines.append("PIP_USER=1")
-    env_lines.append("PATH=/tmp/.local/bin:/usr/local/bin:/usr/bin:/bin")
     env_lines.extend(f"{k}={v}" for k, v in extra_env.items())
     env_lines.extend(f"{k}={v}" for k, v in secrets.items())
 
@@ -161,10 +162,11 @@ async def docker_run(
         "--tmpfs", "/tmp:rw,size=256m,exec",
         "-v", f"{pipeline_dir}:/pipeline:ro",
         "-v", f"{workdir}:/work", "-w", "/work",
-        "-v", f"{PIP_CACHE_DIR}:/tmp/.cache/pip",
     ]
     if use_host_net:
         base_cmd += ["--network", "host"]
+    if gpu:
+        base_cmd += ["--gpus", "all"]
     base_cmd += ["--env-file", str(secrets_env), image]
     proc = await asyncio.create_subprocess_exec(
         *base_cmd, *cmd,
@@ -195,16 +197,12 @@ async def docker_run(
         return TIMEOUT_RC
 
 
-def install_cmd(pipeline_dir: Path, manifest: dict, step_file: str) -> list[str]:
-    """容器内启动命令：按需 pip 安装 + 运行步骤。"""
-    parts: list[str] = []
-    if (pipeline_dir / "requirements.txt").is_file():
-        parts.append("pip install -r /pipeline/requirements.txt")
-    pip_list = manifest.get("pip")
-    if pip_list:
-        parts.append("pip install " + " ".join(shlex.quote(p) for p in pip_list))
-    parts.append(f"python /pipeline/steps/{step_file}")
-    return ["sh", "-c", " && ".join(parts)]
+def install_cmd(step_file: str) -> list[str]:
+    """容器内启动命令：直接运行步骤脚本。
+
+    依赖在镜像 build 期安装（pipeline Dockerfile 全责），运行期不再 pip install。
+    """
+    return ["python", f"/pipeline/steps/{step_file}"]
 
 
 async def _image_exists(image: str) -> bool:
@@ -307,8 +305,6 @@ async def run_pipeline(
         _copy_work(work_source, workdir)
     # 容器以 uid 1000 运行，需对工作目录可写
     workdir.chmod(0o777)
-    PIP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    PIP_CACHE_DIR.chmod(0o777)
 
     secrets = read_secrets(manifest)
 
@@ -356,12 +352,13 @@ async def run_pipeline(
                     workdir=workdir,
                     run_dir=rdir,
                     container_name=container_name,
-                    cmd=install_cmd(pipeline_dir, manifest, step_file),
+                    cmd=install_cmd(step_file),
                     extra_env={env_name(k): v for k, v in params.items()},
                     secrets=secrets,
                     timeout=timeout,
                     log_path=log_path,
                     proxy=manifest.get("proxy"),
+                    gpu=bool(manifest.get("gpu")),
                 )
             except Exception as e:  # noqa: BLE001  docker 启动等致命错误
                 log.exception("run %s 步骤 %s 执行异常", run_id, step_file)

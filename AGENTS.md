@@ -23,10 +23,10 @@ web/                  # Vue3 + Vite 前端（移动端优先，五页面 + 登�
 ├── src/api.js        # token 管理 + fetch 注入 + 401 跳登录；SSE URL 带 ?token=
 └── dist/             # 构建产物（gitignore，由 FastAPI / 托管）
 pipelines/<name>/     # 一个目录 = 一条流水线（git 版本化）
-├── pipeline.yaml     # 清单：params / steps / image|Dockerfile / pip / env / proxy / timeout
+├── pipeline.yaml     # 清单：params / steps / image|Dockerfile / env / proxy / timeout / gpu
 └── steps/NN_*.py     # 有序分步脚本
 scripts/cli.py        # CLI：login/list/run(-w)/status/logs(-f)/rerun/artifacts
-images/base/          # 基础镜像 Dockerfile（py3.11 通用底座，USTC apt 源）
+images/base/          # 契约样板底座（py3.11 + HOME=/tmp 等 ENV，可选 FROM）
 data/                 # gitignore：runs/、secrets/restricted.env、aipipe.db、jwt_secret
 docs/                 # PRD.md（完整设计）/ HANDOFF.md（交接状态）/ DEPLOY.md（部署）
 ```
@@ -36,7 +36,8 @@ docs/                 # PRD.md（完整设计）/ HANDOFF.md（交接状态）/ 
 - **流水线**：`pipeline.yaml` + `steps/` 为硬性要求；镜像来源 `image:` 与 `Dockerfile` **二选一**（registry 校验）
 - **参数注入**：参数 `video_url` → 环境变量 `PIPE_PARAM_VIDEO_URL`；清单 `params:` 声明 type/required/default
 - **密钥**：全局受限 Key 存 `data/secrets/restricted.env`，按清单 `env:` 声明筛选注入，不用用户主 Key
-- **执行模型**：每步骤一次受控 `docker run`（非 root、只读根、`/pipeline` 只读挂载、`/work` 唯一可写、限额 + 超时）；上一步非零退出即终止；支持 `rerun?from_step=N` 断点续跑
+- **执行模型**：每步骤一次受控 `docker run`（非 root、只读根、`/pipeline` 只读挂载、`/work` 唯一可写、限额 + 超时、按需 `--gpus`）；上一步非零退出即终止；支持 `rerun?from_step=N` 断点续跑
+- **镜像契约**：依赖在镜像 build 期 `pip install` 完毕，执行器不做运行期 pip install；运行环境契约（`HOME=/tmp`、`PATH` 等）由 Dockerfile 声明，执行器不再兜底；`aipipe/base:py311` 自带契约可作样板底座
 - **边界原则**：平台不干预容器内执行——LLM 重试/校验写在步骤脚本自身
 - **创建流水线**：走 `create-pipeline` 技能（访谈 → 生成 → 验证）
 

@@ -28,8 +28,8 @@ description: 为 aipipe 创建/固化一条新流水线。当用户说"建个流
 - **外部依赖**：
   - 是否调用 LLM / 外部 API？需要哪些 Key（如 `OPENAI_API_KEY`）？→ 写进清单 `env:`
   - 网络访问是否需要走宿主机代理？→ 清单 `proxy:`
-  - 需要哪些 pip 包？→ 清单 `pip:`
-  - 是否需要 apt 系统依赖（ffmpeg/字体等，运行期非 root + 只读根装不了）？若是，需要自带 `Dockerfile`（FROM aipipe/base:py311 + apt install）
+  - 需要哪些 pip 包？→ **写进 Dockerfile** `pip install`（执行器不做运行期安装，所有依赖必须在镜像 build 期装好；无外部 pip 包的纯 stdlib 流水线可用 `image: aipipe/base:py311`）
+  - 是否需要 apt 系统依赖（ffmpeg/字体等，运行期非 root + 只读根装不了）？若是，需要自带 `Dockerfile`（FROM aipipe/base:py311 或任意其他镜像 + apt install）
 - **断点续跑**：各步骤是否容忍 `/work/` 中已存在的上游产物（`rerun --from N` 依赖于此）？设计产物文件名时避免步骤间互相覆盖。
 - **超时**：各步骤大致耗时，估算 `timeout:`（秒）。
 
@@ -52,8 +52,9 @@ pipelines/<name>/
 
 - `name` 必填（字符串）；`steps` 必填（文件名列表，且每个文件必须真实存在于 `steps/` 下）
 - **镜像来源二选一**：清单写 `image:` 或目录放 `Dockerfile`，两者同时有/同时无都会报错
-- 通用基础镜像 `aipipe/base:py311`（py3.11 + curl/ca-certificates，需先 `docker build -t aipipe/base:py311 images/base`）；无额外系统依赖的流水线直接 `image: aipipe/base:py311`
-- 需要 apt 系统依赖（ffmpeg/字体等，运行期非 root + 只读根装不了）→ 流水线自带 `Dockerfile`：`FROM aipipe/base:py311` + `apt install ...`，执行器自动构建为 `aipipe/<name>:<dirhash>`
+- 通用基础镜像 `aipipe/base:py311`（py3.11 + curl/ca-certificates + 已配好沙箱运行契约 ENV，需先 `docker build -t aipipe/base:py311 images/base`）；无外部 pip 依赖的纯 stdlib 流水线可直接 `image: aipipe/base:py311`
+- 有任何 pip 包依赖 → 必须自带 `Dockerfile`，在 build 期 `pip install`；可 `FROM aipipe/base:py311`（继承运行契约）或任意其他镜像（但需自行补回 `ENV HOME=/tmp PATH=... PYTHONDONTWRITEBYTECODE=1` 等运行契约，否则执行器 `--read-only --user 1000:1000 --tmpfs /tmp` 下跑不通）
+- 需要 apt 系统依赖（ffmpeg/字体等，运行期非 root + 只读根装不了）→ 同样在 `Dockerfile` 里 `apt install`，执行器自动构建为 `aipipe/<name>:<dirhash>`
 
 步骤脚本约定（参考 pipelines/youtube-dub/steps/ 与 example-hello/steps/）：
 

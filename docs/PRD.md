@@ -63,7 +63,6 @@ pipelines/<name>/
 │   └── ...
 ├── Dockerfile             # 可选：自定义构建镜像，存在时优先于清单 image 字段
 ├── docker-compose.yml     # 可选：仅开发期（opencode）本地调试编排；运行期执行器不读取
-├── requirements.txt       # 可选：Python 依赖（与清单 pip 字段互补）
 ├── assets/                # 可选：静态资源（提示词模板、字体等），随 /pipeline 只读挂载
 └── .env.example           # 可选：声明所需密钥/环境变量，供清单 env 参考
 ```
@@ -76,7 +75,8 @@ pipelines/<name>/
 ### 2.3 镜像策略
 
 - 流水线目录存在 `Dockerfile` → 收录/首次运行时构建镜像 `aipipe/<name>:<dirhash>`（层缓存可复用）。
-- 否则用清单 `image:` 指定的基础镜像 + `pip:`/`requirements.txt` 在容器启动时动态安装（pip 缓存卷跨运行复用）。
+- 否则用清单 `image:` 指定的镜像（依赖必须已在镜像内预装；执行器不做运行期 pip install）。
+- 镜像负责声明运行契约（`ENV HOME=/tmp PATH=... PYTHONDONTWRITEBYTECODE=1` 等），以适配执行器的 `--read-only --user 1000:1000 --tmpfs /tmp` 沙箱。`aipipe/base:py311` 自带这些契约，可作样板底座。
 
 ### 2.4 pipeline.yaml 示例
 
@@ -84,7 +84,6 @@ pipelines/<name>/
 name: youtube-dub
 description: 下载视频 → 转写 → 翻译 → TTS 配音 → 合并
 image: aipipe/base:py311          # 预构建通用基础镜像；也可省略并自带 Dockerfile
-pip: [yt-dlp, openai, edge-tts]     # 容器启动时安装（带缓存卷）
 env: [OPENAI_API_KEY]               # 需要从受限密钥库注入的 key
 timeout: 600                        # 每步骤超时秒数（默认值，可按步骤覆盖）
 params:
@@ -117,9 +116,7 @@ docker run --rm
   --user 1000:1000 --read-only              # 非 root + 只读根文件系统
   -v <pipeline_dir>:/pipeline:ro            # 流水线代码/资产只读挂载（git 版本化）
   -v <run_workdir>:/work -w /work           # 唯一可写：本次运行工作目录
-  -v pip-cache:/root/.cache/pip             # pip 缓存跨运行复用
-  --env-file /data/secrets/restricted.env   # 专用受限 Key（按 env 声明筛选注入）
-  -e PIPE_PARAM_VIDEO_URL=...               # 参数注入
+  --env-file <params+secrets>               # 参数 PIPE_PARAM_* + 受限 Key（按 env 声明筛选注入）
   <image> python /pipeline/steps/01_download.py
 ```
 
@@ -227,8 +224,8 @@ aipipe/
 **批次 A：M1 骨架**
 
 - A1 `server/` 骨架：`main.py` / `config.py` / `models.py` / `registry.py` / `executor.py` / `api/{pipelines,runs}.py`。M1 API 最小集：收录 refresh、触发 run、查状态、读日志（纯文本；SSE 归 M2）。
-- A2 执行器：每次 run 建 `/data/runs/<run_id>/work/`；逐步骤受控 `docker run`（见 §4.2）；参数以 `PIPE_PARAM_*` 注入；`data/secrets/restricted.env` 存在时按清单 `env:` 声明筛选注入；目录含 `Dockerfile` 则构建 `aipipe/<name>:<dirhash>`；容器内启动命令 `pip install -r /pipeline/requirements.txt && python /pipeline/steps/NN_*.py`（缓存卷复用）；stdout/stderr 落盘 `<run_id>/logs/NN.log`；上一步非零退出即终止并标记失败步骤。
-- A3 `images/base/Dockerfile`：python:3.11-slim + curl/ca-certificates（通用底座），构建 `aipipe/base:py311`；流水线自带 `Dockerfile` 时在其上 apt install 额外系统依赖。
+- A2 执行器：每次 run 建 `/data/runs/<run_id>/work/`；逐步骤受控 `docker run`（见 §4.2）；参数以 `PIPE_PARAM_*` 注入；`data/secrets/restricted.env` 存在时按清单 `env:` 声明筛选注入；目录含 `Dockerfile` 则构建 `aipipe/<name>:<dirhash>`；容器内启动命令 `python /pipeline/steps/NN_*.py`（依赖在镜像 build 期装好，无运行期 pip install）；运行环境契约（HOME/PATH 等）由镜像 Dockerfile 声明，执行器不兜底；stdout/stderr 落盘 `<run_id>/logs/NN.log`；上一步非零退出即终止并标记失败步骤。
+- A3 `images/base/Dockerfile`：python:3.11-slim + curl/ca-certificates（通用底座）+ 沙箱运行契约 ENV（HOME=/tmp 等），构建 `aipipe/base:py311`；流水线可 FROM 该底座或任意其他镜像，后者需自行补回运行契约。
 - A4 `pipelines/example-hello/`：冒烟流水线（3 步、无网络无 Key，读写 `/work` + 校验 `PIPE_PARAM_*`），验证收录→触发→执行→日志全链路。
 - A5 根 `docker-compose.yml`：挂 docker.sock + `./data` 卷 + `./pipelines` 只读卷；M1 也可直接 `uvicorn` 本地跑（bind localhost，认证归 M3）。
 
@@ -237,8 +234,7 @@ aipipe/
 ```
 pipelines/youtube-dub/
 ├── pipeline.yaml      # params: video_url, target_lang；env 声明 Key；proxy；timeout
-├── Dockerfile         # FROM aipipe/base:py311 + apt install ffmpeg fonts-noto-cjk（自动构建 aipipe/youtube-dub:<dirhash>）
-├── requirements.txt   # yt-dlp, openai, edge-tts
+├── Dockerfile         # FROM aipipe/base:py311 + apt install + pip install（自动构建 aipipe/youtube-dub:<dirhash>）
 ├── .env.example
 └── steps/
     ├── 01_download.py    # yt-dlp 下载视频+字幕(精选语言) → /work/video.mp4 + video.*.vtt
@@ -262,8 +258,8 @@ pipelines/youtube-dub/
 **实测发现与修复**（已固化进代码）：
 
 - 容器内 `/work` 需 uid 1000 可写 → executor 创建后 `chmod 777`
-- `--tmpfs /tmp` 默认 `noexec` → pip 装的命令无法执行 → 加 `exec` 选项
-- pip `--user` 安装到 `/tmp/.local/bin` 不在 PATH → executor 注入 PATH
+- `--tmpfs /tmp` 默认 `noexec` → 加 `exec` 选项
+- ~~pip `--user` 安装到 `/tmp/.local/bin` 不在 PATH → executor 注入 PATH~~ → 已重构废弃：依赖在镜像 build 期安装，运行环境契约由镜像 Dockerfile 声明，执行器不再注入 PATH/HOME 等环境变量
 - 代理：docker 桥无法直达宿主机代理（防火墙限制），`proxy` 流水线改用 host 网络
 - 基础镜像 apt 源换 USTC 镜像（本环境 deb.debian.org 限速严重）
 - yt-dlp 字幕下载用 `--sub-langs ".*"` 会触发 429 → 精选常用语言列表
@@ -288,7 +284,7 @@ pipelines/youtube-dub/
 | 4 | LLM 接入 | 开发期由 opencode 自带能力覆盖；运行期由步骤代码自行调用，厂商可切换 |
 | 5 | 固化机制 | 跑通后**人工确认固化**；**固化流水线内部仍可调用 LLM**（如翻译步骤），其容错由步骤代码负责 |
 | 6 | 执行审批 | **首次执行需审批，固化后免审批**（开发期在 opencode 中天然完成） |
-| 7 | 依赖管理 | **按任务选择合适基础镜像**（Docker Hub/GitHub 等源）+ 动态 pip 安装（带缓存）；流水线可**自带 `Dockerfile`** 构建专用镜像 |
+| 7 | 依赖管理 | **按任务选择合适基础镜像**（Docker Hub/GitHub 等源）+ 依赖在镜像 build 期预装；流水线自带 `Dockerfile` 构建专用镜像（`aipipe/<name>:<dirhash>`） |
 | 8 | 纠错策略 | **有限重试（3~5 次可配），超限转人工**（开发期在 opencode 中天然完成；运行期容器内重试归步骤代码） |
 | 9 | 密钥管理 | **复跑容器注入专用受限 Key**，按需注入，不使用个人主 Key |
 | 10 | 流水线结构 | **分步脚本 + 产物传递**，支持从第 N 步重跑（断点续跑薄实现） |

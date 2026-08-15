@@ -93,8 +93,8 @@ cp docs/restricted.env.example data/secrets/restricted.env
 |---|---|
 | 容器 uid 1000 写不了 `/work` | executor 创建后 `chmod 777` |
 | `--tmpfs /tmp` 默认 `noexec` | 加 `exec` 选项 |
-| pip `--user` 装到 `/tmp/.local/bin` 不在 PATH | 注入 PATH |
-| pip 缓存卷 root 属主 | 宿主 bind + `chmod 777` |
+| ~~pip `--user` 装到 `/tmp/.local/bin` 不在 PATH → 注入 PATH~~ | 重构废弃：依赖在镜像 build 期装好，运行环境契约由 Dockerfile 声明，执行器不再注入 PATH/HOME/PIP_USER |
+| ~~pip 缓存卷 root 属主 → 宿主 bind + chmod 777~~ | 重构废弃：运行期不再 pip install，无需缓存卷 |
 | yt-dlp 字幕 `--sub-langs ".*"` 触发 429 | 精选常用语言列表 |
 | `glob("video.*")` 误选字幕文件 | 优先 `.mp4`，排除 `.vtt`/`.info.json` |
 | 后台进程被 bash 工具杀死 | `setsid + nohup + disown` |
