@@ -7,6 +7,7 @@ timeout: 900
 params:
   video_url:   {type: string, required: true}
   target_lang: {type: string, default: "zh"}
+  burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
 steps:
   - 01_download.py
   - 02_subtitles.py

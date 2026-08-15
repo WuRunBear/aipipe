@@ -12,14 +12,24 @@ work = Path("/work")
 target_lang = os.environ.get("PIPE_PARAM_TARGET_LANG", "zh")
 
 
-def vtt_to_text(vtt: str) -> str:
-    lines = []
-    started = False
+def vtt_to_cues(vtt: str) -> list[dict]:
+    """VTT → [{start, end, text}]，保留时间轴（供烧录翻译后字幕用）。"""
+    cues: list[dict] = []
+    start = end = None
+    buf: list[str] = []
     for raw in vtt.splitlines():
         line = raw.strip()
-        if not started:
-            if "-->" in line:
-                started = True
+        if "-->" in line:
+            if start is not None and buf:
+                cues.append({"start": start, "end": end, "text": "\n".join(buf)})
+            buf = []
+            m = re.match(
+                r"(\d{1,2}:\d{2}(?::\d{2})?\.\d{3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?\.\d{3})",
+                line,
+            )
+            start, end = (m.group(1), m.group(2)) if m else (None, None)
+            continue
+        if start is None:
             continue
         if not line or line.startswith("WEBVTT") or line.startswith("NOTE"):
             continue
@@ -30,8 +40,14 @@ def vtt_to_text(vtt: str) -> str:
         if line.startswith("Kind:") or line.startswith("Language:"):
             continue
         line = re.sub(r"<[^>]+>", "", line)
-        lines.append(line)
-    return "\n".join(lines)
+        buf.append(line)
+    if start is not None and buf:
+        cues.append({"start": start, "end": end, "text": "\n".join(buf)})
+    return cues
+
+
+def vtt_to_text(vtt: str) -> str:
+    return "\n".join(c["text"] for c in vtt_to_cues(vtt))
 
 
 def lang_of(path: Path) -> str:
@@ -69,4 +85,6 @@ if chosen is None:
 text = vtt_to_text(chosen.read_text(encoding="utf-8", errors="replace"))
 (work / "transcript.txt").write_text(text, encoding="utf-8")
 (work / "subs_lang.txt").write_text(lang_of(chosen), encoding="utf-8")
-print(f"[02] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ transcript {len(text)} 字符")
+cues = vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace"))
+(work / "cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
+print(f"[02] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ transcript {len(text)} 字符, {len(cues)} 条 cue")

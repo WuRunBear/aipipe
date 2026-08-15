@@ -16,7 +16,7 @@ const form = reactive({})
 function initForm(params) {
   for (const [key, spec] of Object.entries(params || {})) {
     const s = typeof spec === 'object' ? spec : {}
-    form[key] = s.default ?? ''
+    form[key] = s.type === 'boolean' ? !!s.default : (s.default ?? '')
   }
 }
 
@@ -90,8 +90,20 @@ onMounted(load)
             {{ key }}
             <span v-if="specOf(specRaw).required" class="req">*</span>
           </label>
+          <label
+            v-if="specOf(specRaw).type === 'boolean'"
+            class="check-row"
+            :for="`p-${key}`"
+          >
+            <input
+              :id="`p-${key}`"
+              v-model="form[key]"
+              type="checkbox"
+            />
+            {{ specOf(specRaw).hint || '启用' }}
+          </label>
           <textarea
-            v-if="specOf(specRaw).type === 'text'"
+            v-else-if="specOf(specRaw).type === 'text'"
             :id="`p-${key}`"
             v-model="form[key]"
             :placeholder="specOf(specRaw).default ?? ''"
@@ -102,7 +114,10 @@ onMounted(load)
             v-model="form[key]"
             :placeholder="specOf(specRaw).default ?? ''"
           />
-          <div v-if="specOf(specRaw).hint" class="hint">{{ specOf(specRaw).hint }}</div>
+          <div
+            v-if="specOf(specRaw).hint && specOf(specRaw).type !== 'boolean'"
+            class="hint"
+          >{{ specOf(specRaw).hint }}</div>
         </div>
         <button class="btn" type="submit" :disabled="submitting">
           {{ submitting ? '提交中…' : '开始运行' }}
