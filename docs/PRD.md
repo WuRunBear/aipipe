@@ -83,7 +83,7 @@ pipelines/<name>/
 ```yaml
 name: youtube-dub
 description: 下载视频 → 转写 → 翻译 → TTS 配音 → 合并
-image: aipipe/base:py311-ffmpeg     # 预构建基础镜像；也可省略并自带 Dockerfile
+image: aipipe/base:py311          # 预构建通用基础镜像；也可省略并自带 Dockerfile
 pip: [yt-dlp, openai, edge-tts]     # 容器启动时安装（带缓存卷）
 env: [OPENAI_API_KEY]               # 需要从受限密钥库注入的 key
 timeout: 600                        # 每步骤超时秒数（默认值，可按步骤覆盖）
@@ -211,7 +211,7 @@ aipipe/
 ├── web/               # 移动端优先前端（Vue3 或 htmx，轻量）
 ├── pipelines/         # 流水线资产（git 管理，opencode 固化写入处）
 ├── templates/         # 可选：步骤/LLM 重试代码模板（opencode 固化时参考）
-├── images/base/       # 基础镜像 Dockerfile（py3.11 + ffmpeg + 常用工具）
+├── images/base/       # 通用基础镜像 Dockerfile（py3.11 + curl/ca-certificates）
 ├── data/              # 运行数据（.gitignore 不入库）：runs 产物 / secrets / sqlite
 └── docker-compose.yml # 一键部署（挂 docker.sock + data 卷）
 ```
@@ -228,7 +228,7 @@ aipipe/
 
 - A1 `server/` 骨架：`main.py` / `config.py` / `models.py` / `registry.py` / `executor.py` / `api/{pipelines,runs}.py`。M1 API 最小集：收录 refresh、触发 run、查状态、读日志（纯文本；SSE 归 M2）。
 - A2 执行器：每次 run 建 `/data/runs/<run_id>/work/`；逐步骤受控 `docker run`（见 §4.2）；参数以 `PIPE_PARAM_*` 注入；`data/secrets/restricted.env` 存在时按清单 `env:` 声明筛选注入；目录含 `Dockerfile` 则构建 `aipipe/<name>:<dirhash>`；容器内启动命令 `pip install -r /pipeline/requirements.txt && python /pipeline/steps/NN_*.py`（缓存卷复用）；stdout/stderr 落盘 `<run_id>/logs/NN.log`；上一步非零退出即终止并标记失败步骤。
-- A3 `images/base/Dockerfile`：python:3.11-slim + ffmpeg + 常用工具，构建 `aipipe/base:py311-ffmpeg`。
+- A3 `images/base/Dockerfile`：python:3.11-slim + curl/ca-certificates（通用底座），构建 `aipipe/base:py311`；流水线自带 `Dockerfile` 时在其上 apt install 额外系统依赖。
 - A4 `pipelines/example-hello/`：冒烟流水线（3 步、无网络无 Key，读写 `/work` + 校验 `PIPE_PARAM_*`），验证收录→触发→执行→日志全链路。
 - A5 根 `docker-compose.yml`：挂 docker.sock + `./data` 卷 + `./pipelines` 只读卷；M1 也可直接 `uvicorn` 本地跑（bind localhost，认证归 M3）。
 
@@ -237,6 +237,7 @@ aipipe/
 ```
 pipelines/youtube-dub/
 ├── pipeline.yaml      # params: video_url, target_lang；env 声明 Key；proxy；timeout
+├── Dockerfile         # FROM aipipe/base:py311 + apt install ffmpeg fonts-noto-cjk（自动构建 aipipe/youtube-dub:<dirhash>）
 ├── requirements.txt   # yt-dlp, openai, edge-tts
 ├── .env.example
 └── steps/

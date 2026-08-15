@@ -1,3 +1,6 @@
+# aipipe 通用基础镜像：python 3.11 + curl/ca-certificates + uid 1000 运行契约。
+# 流水线若需额外系统依赖（ffmpeg/字体等），在 pipelines/<name>/Dockerfile 里
+# FROM aipipe/base:py311 自行 apt install，由执行器自动构建为 aipipe/<name>:<dirhash>。
 FROM python:3.11-slim
 
 # apt 源可换镜像（默认 USTC；deb.debian.org 在本环境限速严重）
@@ -8,7 +11,7 @@ RUN sed -i \
     -e "s|http://deb.debian.org/debian|http://${APT_MIRROR}/debian|g" \
     /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # 运行期以非 root（uid 1000）执行；--read-only 下 HOME 置于 tmpfs /tmp

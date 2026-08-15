@@ -34,7 +34,7 @@ web/                  # M2 前端（Vue3 + Vite + vue-router）
 └── dist/             # 构建产物（gitignore，FastAPI / 托管）
 scripts/cli.py        # M3 CLI：login/list/run(-w)/status/logs(-f)/rerun/artifacts
 pipelines/            # example-hello（冒烟）、youtube-dub（试点）
-images/base/          # 基础镜像 Dockerfile（py3.11 + ffmpeg，USTC apt 源）
+images/base/          # 基础镜像 Dockerfile（py3.11 通用底座，USTC apt 源）
 data/                 # gitignore：runs/、secrets/restricted.env、aipipe.db、jwt_secret
 ```
 
@@ -44,7 +44,7 @@ data/                 # gitignore：runs/、secrets/restricted.env、aipipe.db�
 # 依赖：server/requirements.txt（fastapi uvicorn[standard] sqlalchemy pyyaml bcrypt pyjwt）
 # venv 在 /tmp/opencode/venv-aipipe（无 pip 模块，用 `pip --target <site-packages>` 补装）
 
-docker build -t aipipe/base:py311-ffmpeg images/base        # 一次
+docker build -t aipipe/base:py311 images/base             # 一次
 cd web && npm install && npm run build && cd ..             # 前端（改过 src/ 后）
 setsid nohup <venv>/bin/python -m uvicorn server.main:app --host 127.0.0.1 --port 8000 >/tmp/opencode/aipipe-uvicorn.log 2>&1 </dev/null & disown
 

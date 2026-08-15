@@ -1,6 +1,5 @@
 name: youtube-dub
 description: 下载视频+字幕 → 解析字幕 → 翻译 → TTS 配音 → 合并
-image: aipipe/base:py311-ffmpeg
 pip: [yt-dlp, "openai<3"]
 env: [OPENAI_API_KEY, OPENAI_BASE_URL, TRANSLATE_MODEL, TTS_BASE_URL, TTS_API_KEY, TTS_MODEL, TTS_VOICE]
 proxy: http://127.0.0.1:7890   # 仅本流水线注入代理并改用 host 网络（不经 docker 桥，可直达宿主机代理）

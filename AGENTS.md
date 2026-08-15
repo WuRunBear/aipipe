@@ -26,7 +26,7 @@ pipelines/<name>/     # 一个目录 = 一条流水线（git 版本化）
 ├── pipeline.yaml     # 清单：params / steps / image|Dockerfile / pip / env / proxy / timeout
 └── steps/NN_*.py     # 有序分步脚本
 scripts/cli.py        # CLI：login/list/run(-w)/status/logs(-f)/rerun/artifacts
-images/base/          # 基础镜像 Dockerfile（py3.11 + ffmpeg，USTC 源）
+images/base/          # 基础镜像 Dockerfile（py3.11 通用底座，USTC apt 源）
 data/                 # gitignore：runs/、secrets/restricted.env、aipipe.db、jwt_secret
 docs/                 # PRD.md（完整设计）/ HANDOFF.md（交接状态）/ DEPLOY.md（部署）
 ```
@@ -43,7 +43,7 @@ docs/                 # PRD.md（完整设计）/ HANDOFF.md（交接状态）/ 
 ## 常用命令
 
 ```bash
-docker build -t aipipe/base:py311-ffmpeg images/base   # 基础镜像（首次）
+docker build -t aipipe/base:py311 images/base          # 基础镜像（首次）
 cd web && npm install && npm run build && cd ..        # 前端构建
 pip install -r server/requirements.txt                 # 后端依赖
 uvicorn server.main:app --host 0.0.0.0 --port 8000     # 启动服务

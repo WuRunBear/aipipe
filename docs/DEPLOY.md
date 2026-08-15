@@ -17,7 +17,7 @@
 
 ```bash
 # 1. 构建基础镜像
-docker build -t aipipe/base:py311-ffmpeg images/base
+docker build -t aipipe/base:py311 images/base
 
 # 2. 构建前端
 cd web && npm install && npm run build && cd ..
