@@ -89,8 +89,21 @@ timeout: 600                        # 每步骤超时秒数（默认值，可按
 params:
   video_url:   {type: string, required: true}
   target_lang: {type: string, default: "zh"}
+  # path 类型：宿主路径只读挂载到容器内（见 §2.5）
+  intro_video: {type: path, required: false, mount: /input/intro.mp4,
+                hint: 可选片头宿主路径}
 steps: [01_download.py, 02_transcribe.py, 03_translate.py, 04_tts.py, 05_merge.py]
 ```
+
+### 2.5 path 参数（读宿主上的文件）
+
+参数 schema 里 `type: path` 触发执行器把宿主路径**只读挂载**到容器内，让流水线能消费宿主上已有的本地文件而无需先上传到 `/work/`。
+
+- `mount:` 必填，必须是绝对路径，不得覆盖沙箱关键目录（`/`、`/work`、`/pipeline`、`/tmp`）；推荐 `/input/*` 命名空间
+- 不支持 `default`（避免默认值在不同机器上不存在）；要么必填，要么可选且未传时跳过挂载
+- 用户传值必须是绝对路径且路径存在（运行触发时校验，422 返回）
+- 容器内步骤代码看的环境变量值是挂载点路径（如 `/input/intro.mp4`），不是宿主原路径——代码无感知挂载机制
+- 仅 `:ro` 只读挂载；需修改的话先复制到 `/work/`
 
 ## 3. 边界原则（平台不干预容器内执行）
 
@@ -116,6 +129,7 @@ docker run --rm
   --user 1000:1000 --read-only              # 非 root + 只读根文件系统
   -v <pipeline_dir>:/pipeline:ro            # 流水线代码/资产只读挂载（git 版本化）
   -v <run_workdir>:/work -w /work           # 唯一可写：本次运行工作目录
+  -v <host_path>:<mount>:ro ...             # path 类型参数按清单 mount 声明只读挂载（见 §2.5）
   --env-file <params+secrets>               # 参数 PIPE_PARAM_* + 受限 Key（按 env 声明筛选注入）
   <image> python /pipeline/steps/01_download.py
 ```

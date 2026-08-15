@@ -31,19 +31,21 @@ async def create_run(pipeline_id: int, body: dict | None = None, _user: str = Au
             raise HTTPException(400, "流水线不可用")
         manifest = load_manifest(Path(pipeline.source_dir))
         try:
-            cleaned = validate_params(manifest, params)
+            cleaned, path_mounts = validate_params(manifest, params)
         except ParamsError as e:
             raise HTTPException(422, str(e)) from e
 
-        run = Run(pipeline_id=pipeline_id, params_json=json.dumps(cleaned))
+        # 入库存用户原入参（保留宿主 path 原值，便于 rerun 重新校验+重建 mounts；
+        # web 端展示也是用户实际输入而非改写后容器内路径）
+        run = Run(pipeline_id=pipeline_id, params_json=json.dumps(params))
         session.add(run)
         session.commit()
         run_id = run.id
 
-    task = asyncio.create_task(run_pipeline(run_id, pipeline, cleaned))
+    task = asyncio.create_task(run_pipeline(run_id, pipeline, cleaned, path_mounts=path_mounts))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
-    return {"id": run_id, "status": "queued", "pipeline_id": pipeline_id, "params": cleaned}
+    return {"id": run_id, "status": "queued", "pipeline_id": pipeline_id, "params": params}
 
 
 def _run_to_dict(run: Run) -> dict:
@@ -126,6 +128,11 @@ async def rerun_run(
         if not 1 <= from_step <= len(steps):
             raise HTTPException(422, f"from_step 需在 1..{len(steps)} 之间")
         params = json.loads(old.params_json or "{}")
+        try:
+            cleaned, path_mounts = validate_params(manifest, params)
+        except ParamsError as e:
+            # rerun 时宿主路径可能已变（移动/删除），重新校验失败则报错
+            raise HTTPException(422, f"重跑校验失败：{e}") from e
         run = Run(pipeline_id=pipeline.id, params_json=json.dumps(params))
         session.add(run)
         session.commit()
@@ -133,9 +140,10 @@ async def rerun_run(
 
     task = asyncio.create_task(
         run_pipeline(
-            new_run_id, pipeline, params,
+            new_run_id, pipeline, cleaned,
             from_step=from_step,
             work_source=_run_dir(run_id) / "work",
+            path_mounts=path_mounts,
         )
     )
     _tasks.add(task)

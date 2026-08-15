@@ -35,6 +35,7 @@ docs/                 # PRD.md（完整设计）/ HANDOFF.md（交接状态）/ 
 
 - **流水线**：`pipeline.yaml` + `steps/` 为硬性要求；镜像来源 `image:` 与 `Dockerfile` **二选一**（registry 校验）
 - **参数注入**：参数 `video_url` → 环境变量 `PIPE_PARAM_VIDEO_URL`；清单 `params:` 声明 type/required/default
+- **path 参数**：`type: path` 参数把宿主路径只读挂载到容器内（清单 `mount:` 声明挂载点，推荐 `/input/*`）；不支持 default、必须绝对路径且存在；容器内 see 挂载点路径而非宿主原路径
 - **密钥**：全局受限 Key 存 `data/secrets/restricted.env`，按清单 `env:` 声明筛选注入，不用用户主 Key
 - **执行模型**：每步骤一次受控 `docker run`（非 root、只读根、`/pipeline` 只读挂载、`/work` 唯一可写、限额 + 超时、按需 `--gpus`）；上一步非零退出即终止；支持 `rerun?from_step=N` 断点续跑
 - **镜像契约**：依赖在镜像 build 期 `pip install` 完毕，执行器不做运行期 pip install；运行环境契约（`HOME=/tmp`、`PATH` 等）由 Dockerfile 声明，执行器不再兜底；`aipipe/base:py311` 自带契约可作样板底座

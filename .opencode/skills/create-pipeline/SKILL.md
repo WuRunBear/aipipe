@@ -24,6 +24,7 @@ description: 为 aipipe 创建/固化一条新流水线。当用户说"建个流
 需求确认后，逐项确认以下内容（同样以提问为主，能推断的先给默认值让用户确认）：
 
 - **输入参数**：用户每次运行要提供什么（如 `video_url`）？哪些必填、哪些有默认值？参数命名用 snake_case。
+  - 是否需要读宿主机上的本地文件？→ 用 `type: path` 参数（见下方"path 参数"段）
 - **步骤拆分**：任务自然分成几步（如 下载→处理→转换→输出）？每一步的输入文件和输出文件是什么？步骤间通过 `/work/` 下的文件传递。
 - **外部依赖**：
   - 是否调用 LLM / 外部 API？需要哪些 Key（如 `OPENAI_API_KEY`）？→ 写进清单 `env:`
@@ -55,6 +56,30 @@ pipelines/<name>/
 - 通用基础镜像 `aipipe/base:py311`（py3.11 + curl/ca-certificates + 已配好沙箱运行契约 ENV，需先 `docker build -t aipipe/base:py311 images/base`）；无外部 pip 依赖的纯 stdlib 流水线可直接 `image: aipipe/base:py311`
 - 有任何 pip 包依赖 → 必须自带 `Dockerfile`，在 build 期 `pip install`；可 `FROM aipipe/base:py311`（继承运行契约）或任意其他镜像（但需自行补回 `ENV HOME=/tmp PATH=... PYTHONDONTWRITEBYTECODE=1` 等运行契约，否则执行器 `--read-only --user 1000:1000 --tmpfs /tmp` 下跑不通）
 - 需要 apt 系统依赖（ffmpeg/字体等，运行期非 root + 只读根装不了）→ 同样在 `Dockerfile` 里 `apt install`，执行器自动构建为 `aipipe/<name>:<dirhash>`
+
+### path 参数（读宿主上的文件）
+
+参数 schema 里 `type: path` 触发执行器把宿主路径**只读挂载**到容器内：
+
+```yaml
+params:
+  intro_music:
+    type: path
+    required: false              # 可选；未传则不挂载、不注入环境变量
+    mount: /input/intro.mp3      # 容器内挂载点（必填，绝对路径）
+    hint: 片头音乐宿主路径
+  source_video:
+    type: path
+    required: true               # 必填（path 不支持 default）
+    mount: /input/source.mp4
+```
+
+**规则**：
+- `mount` 必填且必须是绝对路径，不得覆盖沙箱关键目录（`/`、`/work`、`/pipeline`、`/tmp`）；推荐挂在 `/input/*` 命名空间下
+- `type: path` **不支持 `default`**（避免默认路径在不同机器上不存在）；要么 `required: true`，要么 `required: false` + 不传值时跳过挂载
+- 用户传值必须是绝对路径且路径存在（否则运行触发返回 422）
+- 容器内步骤代码看到的环境变量值是**挂载点路径**（如 `/input/source.mp4`），不是宿主原路径——步骤代码无感知挂载机制，照常用 `os.environ.get(...)` 读取
+- 仅只读挂载（`:ro`）；如需在容器内修改，先复制到 `/work/` 再改
 
 步骤脚本约定（参考 pipelines/youtube-dub/steps/ 与 example-hello/steps/）：
 

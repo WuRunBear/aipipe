@@ -95,3 +95,24 @@ sudo systemctl restart docker
 ```
 
 无 GPU 的部署机可忽略本节，仅需不收录任何声明 `gpu: true` 的流水线即可。
+
+## path 参数（消费宿主上的文件）
+
+清单 `params:` 里 `type: path` 的参数，触发时由执行器把用户传入的宿主绝对路径**只读挂载**到容器内（清单 `mount:` 字段声明的挂载点）。无需先把文件上传到 `/work/`。
+
+```yaml
+params:
+  intro_video:
+    type: path
+    required: true
+    mount: /input/intro.mp4     # 容器内步骤代码看到的是这个路径
+```
+
+规则（违反即触发收录失败 / 运行 422）：
+
+- `mount:` 必填、绝对路径、不得覆盖沙箱关键目录（`/`、`/work`、`/pipeline`、`/tmp`）；推荐 `/input/*` 命名空间
+- `type: path` 不支持 `default`（避免默认路径跨机器不一致）；要么必填，要么可选未传则跳过挂载
+- 用户传值必须是绝对路径且宿主上存在；执行器自动 `-v <host>:<mount>:ro`，容器内代码 `os.environ.get("PIPE_PARAM_INTRO_VIDEO")` 拿到的是挂载点路径而非宿主原路径
+- 仅只读挂载；需修改的话在容器内先复制到 `/work/`
+
+重跑时执行器根据原入参重新 validate + 重建挂载；若宿主路径已变（移动/删除），重跑触发阶段返回 422。

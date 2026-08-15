@@ -72,6 +72,41 @@ def validate_manifest(pipeline_dir: Path, manifest: dict) -> None:
     if has_image == has_dockerfile:
         raise RegistryError("镜像来源必须二选一：image 字段 或 Dockerfile")
 
+    _validate_params_schema(manifest.get("params") or {})
+
+
+# path 参数的 mount 不得覆盖沙箱关键路径（与 executor._SANDBOX_PATHS 同源）
+_SANDBOX_PATHS = ("/work", "/pipeline", "/tmp")
+
+
+def _is_subpath(child: str, parent: str) -> bool:
+    if parent == "/":
+        return True
+    return child == parent or child.startswith(parent.rstrip("/") + "/")
+
+
+def _validate_params_schema(schema: dict) -> None:
+    """收录期静态校验参数 schema：path 类型的 mount 必填/绝对路径/不覆盖沙箱。"""
+    for key, spec in schema.items():
+        if isinstance(spec, str):
+            try:
+                spec = yaml.safe_load(spec)
+            except yaml.YAMLError:
+                continue
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("type") != "path":
+            continue
+        mount = spec.get("mount")
+        if not mount or not Path(mount).is_absolute():
+            raise RegistryError(f"参数 {key}（path 类型）的 mount 必须是绝对路径")
+        if any(_is_subpath(mount, sp) for sp in _SANDBOX_PATHS):
+            raise RegistryError(
+                f"参数 {key} 的 mount={mount} 不可覆盖沙箱关键路径"
+            )
+        if "default" in spec:
+            raise RegistryError(f"参数 {key}（path 类型）不支持 default（避免跨机器路径不一致）")
+
 
 def resolve_image(pipeline_dir: Path, manifest: dict) -> str:
     """返回运行时要用的镜像名；Dockerfile 流水线返回 `<prefix>/<name>:<dirhash>`。"""

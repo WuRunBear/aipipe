@@ -42,10 +42,27 @@ def run_dir(run_id: str) -> Path:
     return DATA_DIR / "runs" / run_id
 
 
-def validate_params(manifest: dict, params: dict) -> dict:
-    """M1 最小校验：required 字段齐全；值统一转字符串。"""
+# 沙箱关键路径，path 参数的 mount 不得落在这些目录之下（避免覆盖沙箱约束）
+_SANDBOX_PATHS = ("/work", "/pipeline", "/tmp")
+
+
+def _is_subpath(child: str, parent: str) -> bool:
+    """child 是否 == parent 或在 parent 之下。"""
+    if parent == "/":
+        return True
+    return child == parent or child.startswith(parent.rstrip("/") + "/")
+
+
+def validate_params(manifest: dict, params: dict) -> tuple[dict[str, str], list[tuple[Path, str]]]:
+    """校验参数 + 收集 path 类型挂载。
+
+    返回 (env_vars, path_mounts)：
+    - env_vars: 参数 → 环境变量值（path 类型已被改写为容器内挂载点路径）
+    - path_mounts: [(host_path, container_path)] 供 docker_run 加 -v ...:ro
+    """
     schema = manifest.get("params") or {}
     cleaned: dict[str, str] = {}
+    path_mounts: list[tuple[Path, str]] = []
     for key, spec in schema.items():
         if isinstance(spec, str):
             try:
@@ -54,7 +71,35 @@ def validate_params(manifest: dict, params: dict) -> dict:
                 spec = {"type": "string"}
         if not isinstance(spec, dict):
             spec = {"type": "string"}
+        ptype = spec.get("type", "string")
         value = params.get(key)
+
+        # path 类型：宿主路径 → 容器内只读挂载（清单 mount 字段声明挂载点）
+        if ptype == "path":
+            mount = spec.get("mount")
+            if not mount or not Path(mount).is_absolute():
+                raise ParamsError(f"path 参数 {key} 的 mount 必须是绝对路径")
+            if any(_is_subpath(mount, sp) for sp in _SANDBOX_PATHS):
+                raise ParamsError(
+                    f"path 参数 {key} 的 mount={mount} 不可覆盖沙箱关键路径 {_SANDBOX_PATHS}"
+                )
+            if "default" in spec:
+                raise ParamsError(f"path 参数 {key} 不支持 default（避免跨机器路径不一致）")
+            if value is None or value == "":
+                if spec.get("required"):
+                    raise ParamsError(f"缺少必填参数：{key}")
+                continue  # 可选且未传：不挂载，不注入环境变量
+            host = Path(str(value))
+            if not host.is_absolute():
+                raise ParamsError(f"path 参数 {key} 必须是绝对路径：{value}")
+            host = host.resolve()
+            if not host.exists():
+                raise ParamsError(f"path 参数 {key} 路径不存在：{host}")
+            path_mounts.append((host, mount))
+            cleaned[key] = mount  # 容器内看到的是挂载点路径，非宿主原路径
+            continue
+
+        # 标量参数（string/number/boolean）
         if value is None:
             if spec.get("required"):
                 raise ParamsError(f"缺少必填参数：{key}")
@@ -64,7 +109,7 @@ def validate_params(manifest: dict, params: dict) -> dict:
             else:
                 continue
         cleaned[key] = str(value)
-    return cleaned
+    return cleaned, path_mounts
 
 
 def env_name(key: str) -> str:
@@ -121,6 +166,7 @@ async def docker_run(
     log_path: Path,
     proxy: str | None = None,
     gpu: bool = False,
+    mounts: list[tuple[Path, str]] | None = None,
 ) -> int:
     """执行一次受控 docker run，输出流式写日志文件，返回退出码。
 
@@ -163,6 +209,9 @@ async def docker_run(
         "-v", f"{pipeline_dir}:/pipeline:ro",
         "-v", f"{workdir}:/work", "-w", "/work",
     ]
+    # path 类型参数按 mount 声明只读挂载宿主路径到容器内
+    for host_path, container_path in mounts or []:
+        base_cmd += ["-v", f"{host_path}:{container_path}:ro"]
     if use_host_net:
         base_cmd += ["--network", "host"]
     if gpu:
@@ -281,10 +330,14 @@ async def run_pipeline(
     params: dict,
     from_step: int = 1,
     work_source: Path | None = None,
+    path_mounts: list[tuple[Path, str]] | None = None,
 ) -> None:
     """执行整条流水线（后台任务入口）。
 
-    run_id: 已入库的 Run.id；pipeline: 已入库的 Pipeline 记录；params: 已校验参数。
+    run_id: 已入库的 Run.id；pipeline: 已入库的 Pipeline 记录；params: 已校验的
+    环境变量级参数（path 类型的值已是容器内挂载点路径）。
+    path_mounts: validate_params 收集的 [(host_path, container_path)]，透传
+    给每个 docker run 加 -v ...:ro；重跑时从原入参重新 validate 重建。
     from_step: 从第 N 步开始（1-based，前面步骤不执行）；work_source: 复制该 run 的
     work/ 作为本次初始工作目录（rerun 断点续跑用）。
     """
@@ -359,6 +412,7 @@ async def run_pipeline(
                     log_path=log_path,
                     proxy=manifest.get("proxy"),
                     gpu=bool(manifest.get("gpu")),
+                    mounts=path_mounts,
                 )
             except Exception as e:  # noqa: BLE001  docker 启动等致命错误
                 log.exception("run %s 步骤 %s 执行异常", run_id, step_file)
