@@ -1,21 +1,33 @@
-"""步骤 4/5：edge-tts 分段合成配音 → /work/dub.mp3。
+"""步骤 4/5：OpenAI 兼容 TTS（/audio/speech）分段合成配音 → /work/dub.mp3。
 
-分段以避免单次合成过长；某段失败仅重试该段。
+端点与 key 独立于翻译：TTS_BASE_URL / TTS_API_KEY（本地服务可不填 key，
+脚本用占位符）；分段以避免单次合成过长；某段失败仅重试该段。
 """
-import asyncio
 import os
 import subprocess
 import time
 from pathlib import Path
 
-import edge_tts
+from openai import OpenAI
 
 work = Path("/work")
 translated = (work / "translated.txt").read_text(encoding="utf-8").strip()
 target_lang = os.environ.get("PIPE_PARAM_TARGET_LANG", "zh")
 
+base_url = os.environ.get("TTS_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+if not base_url:
+    raise SystemExit("未配置 TTS_BASE_URL（或 OPENAI_BASE_URL）")
+api_key = (
+    os.environ.get("TTS_API_KEY")
+    or os.environ.get("OPENAI_API_KEY")
+    or "local"  # 本地兼容服务通常不校验 key
+)
+client = OpenAI(api_key=api_key, base_url=base_url)
+
+model = os.environ.get("TTS_MODEL", "tts-1")
+
 VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
-voice = VOICES.get(target_lang, VOICES["zh"])
+voice = os.environ.get("TTS_VOICE") or VOICES.get(target_lang, "alloy")
 
 
 def chunk_text(text: str, max_chars: int = 800) -> list[str]:
@@ -32,12 +44,17 @@ def chunk_text(text: str, max_chars: int = 800) -> list[str]:
     return chunks
 
 
-async def synth_one(chunk: str, out: Path, retries: int = 3) -> None:
+def synth_one(chunk: str, out: Path, retries: int = 3) -> None:
     last = None
     for attempt in range(1, retries + 1):
         try:
-            c = edge_tts.Communicate(chunk, voice)
-            await c.save(str(out))
+            resp = client.audio.speech.create(
+                model=model,
+                voice=voice,
+                input=chunk,
+                response_format="mp3",
+            )
+            resp.stream_to_file(str(out))
             if out.stat().st_size > 0:
                 return
             raise ValueError("TTS 输出为空")
@@ -45,19 +62,19 @@ async def synth_one(chunk: str, out: Path, retries: int = 3) -> None:
             last = e
             print(f"[04] 段落 {out.name} 重试 {attempt}/{retries}: {e}")
             if attempt < retries:
-                await asyncio.sleep(2 * attempt)
+                time.sleep(2 * attempt)
     raise SystemExit(f"TTS 段落 {out.name} 失败: {last}")
 
 
-async def main() -> None:
+def main() -> None:
     chunks = chunk_text(translated)
     if not chunks:
         raise SystemExit("无可用译文")
-    print(f"[04] {len(chunks)} 段, voice={voice}")
+    print(f"[04] {len(chunks)} 段, model={model}, voice={voice}, base_url={base_url}")
     chunk_files: list[Path] = []
     for i, chunk in enumerate(chunks):
         out = work / f"tts_{i:03d}.mp3"
-        await synth_one(chunk, out)
+        synth_one(chunk, out)
         chunk_files.append(out)
 
     concat = work / "concat.txt"
@@ -74,4 +91,4 @@ async def main() -> None:
     print(f"[04] dub.mp3 done: {sum(p.stat().st_size for p in chunk_files)} bytes")
 
 
-asyncio.run(main())
+main()
