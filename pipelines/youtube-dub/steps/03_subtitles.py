@@ -1,7 +1,10 @@
-"""步骤 2/5：从下载的字幕（VTT）解析出纯文本转录 → /work/transcript.txt。
+"""步骤 3/6：从下载的字幕（VTT）解析 cues → /work/cues.json。
 
 优先选择视频原声语言的字幕（来自 video.info.json 的 language 字段），
 其次选择与目标语言不同的非自动翻译字幕（无 '-' 标签）。
+
+cues 是后续翻译/TTS/烧录的唯一单元，每条含 start/end（VTT 时间字符串）
+与 text。下游 04 把时间字符串预解析为整数毫秒。
 """
 import json
 import os
@@ -46,10 +49,6 @@ def vtt_to_cues(vtt: str) -> list[dict]:
     return cues
 
 
-def vtt_to_text(vtt: str) -> str:
-    return "\n".join(c["text"] for c in vtt_to_cues(vtt))
-
-
 def lang_of(path: Path) -> str:
     return path.name.rsplit(".", 2)[1]
 
@@ -82,9 +81,6 @@ if chosen is None:
 if chosen is None:
     chosen = Path(vtts[0])
 
-text = vtt_to_text(chosen.read_text(encoding="utf-8", errors="replace"))
-(work / "transcript.txt").write_text(text, encoding="utf-8")
-(work / "subs_lang.txt").write_text(lang_of(chosen), encoding="utf-8")
 cues = vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace"))
 (work / "cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
-print(f"[02] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ transcript {len(text)} 字符, {len(cues)} 条 cue")
+print(f"[03] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ cues {len(cues)} 条")

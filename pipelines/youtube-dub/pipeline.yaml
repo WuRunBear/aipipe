@@ -1,16 +1,19 @@
 name: youtube-dub
-description: 下载视频+字幕 → 解析字幕 → 翻译 → TTS 配音 → 合并
-pip: [yt-dlp, "openai<3"]
+description: 下载→人声分离→字幕→翻译→TTS 对齐→混音
 env: [OPENAI_API_KEY, OPENAI_BASE_URL, TRANSLATE_MODEL, TTS_BASE_URL, TTS_API_KEY, TTS_MODEL, TTS_VOICE]
 proxy: http://127.0.0.1:7890   # 仅本流水线注入代理并改用 host 网络（不经 docker 桥，可直达宿主机代理）
-timeout: 900
+timeout: 3600
+gpu: true                       # 需要 --gpus all 透传宿主 GPU（demucs 在 GPU 上速度差 10×+）
 params:
-  video_url:   {type: string, required: true}
-  target_lang: {type: string, default: "zh"}
+  video_url:     {type: string, required: true}
+  target_lang:   {type: string, default: "zh"}
   burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
+  dub_volume:    {type: number, default: 1.0, hint: 配音音量（amix 前的 volume 滤镜）}
+  bgm_volume:    {type: number, default: 0.6, hint: 背景音音量}
 steps:
   - 01_download.py
-  - 02_subtitles.py
-  - 03_translate.py
-  - 04_tts.py
-  - 05_merge.py
+  - 02_separate.py
+  - 03_subtitles.py
+  - 04_translate.py
+  - 05_tts.py
+  - 06_merge.py
