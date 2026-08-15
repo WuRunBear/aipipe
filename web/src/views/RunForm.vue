@@ -109,6 +109,13 @@ onMounted(load)
             :placeholder="specOf(specRaw).default ?? ''"
           ></textarea>
           <input
+            v-else-if="specOf(specRaw).type === 'number'"
+            :id="`p-${key}`"
+            v-model.number="form[key]"
+            type="number"
+            :placeholder="specOf(specRaw).default ?? ''"
+          />
+          <input
             v-else
             :id="`p-${key}`"
             v-model="form[key]"
