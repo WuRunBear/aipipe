@@ -24,6 +24,7 @@ from .config import (
     SECRETS_ENV_TEMPLATE,
 )
 from .models import Run, SessionLocal, StepRun, get_settings, utcnow
+from .registry import resolve_image
 
 log = logging.getLogger(__name__)
 
@@ -206,35 +207,74 @@ def install_cmd(pipeline_dir: Path, manifest: dict, step_file: str) -> list[str]
     return ["sh", "-c", " && ".join(parts)]
 
 
-async def ensure_image(image: str, pipeline_dir: Path) -> None:
-    """镜像不存在时构建（仅 Dockerfile 流水线有意义）；构建失败抛错。"""
-    inspect = await asyncio.create_subprocess_exec(
+async def _image_exists(image: str) -> bool:
+    proc = await asyncio.create_subprocess_exec(
         "docker", "image", "inspect", image,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    if await inspect.wait() == 0:
+    return await proc.wait() == 0
+
+
+async def _cleanup_old_tags(image: str) -> None:
+    """best-effort 清理同 repo 的旧 tag（Dockerfile 流水线哈希变更后旧 tag 无人删）。"""
+    if ":" not in image:
+        return
+    name, cur = image.rsplit(":", 1)
+    ls = await asyncio.create_subprocess_exec(
+        "docker", "images", name, "--format", "{{.Tag}}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await ls.communicate()
+    for tag in (out or b"").decode().splitlines():
+        tag = tag.strip()
+        if not tag or tag == cur or tag == "<none>":
+            continue
+        rm = await asyncio.create_subprocess_exec(
+            "docker", "rmi", f"{name}:{tag}",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        await rm.wait()
+        log.info("清理旧镜像 tag: %s:%s", name, tag)
+
+
+_build_locks: dict[str, asyncio.Lock] = {}
+
+
+async def ensure_image(image: str, pipeline_dir: Path) -> None:
+    """镜像不存在时构建（仅 Dockerfile 流水线有意义）；构建失败抛错。
+
+    按 tag 加锁避免并发 run 同时构建；双检已存在则跳过；构建成功后清理同
+    流水线旧 tag。
+    """
+    # 快速路径：已存在直接返回（不加锁）
+    if await _image_exists(image):
         return
     if not (pipeline_dir / "Dockerfile").is_file():
         raise ExecutorError(f"镜像不存在：{image}（且流水线无 Dockerfile 可构建）")
-    log.info("构建镜像 %s ...", image)
-    build = await asyncio.create_subprocess_exec(
-        "docker", "build", "-t", image, str(pipeline_dir),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    assert build.stdout is not None
-    log_path = DATA_DIR / "builds" / f"{image.replace('/', '_')}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("wb") as f:
-        while True:
-            chunk = await build.stdout.read(8192)
-            if not chunk:
-                break
-            f.write(chunk)
-    rc = await build.wait()
-    if rc != 0:
-        raise ExecutorError(f"镜像构建失败（exit {rc}）：{image}，日志见 {log_path}")
+    lock = _build_locks.setdefault(image, asyncio.Lock())
+    async with lock:
+        if await _image_exists(image):
+            return  # 别的并发任务已建好
+        log.info("构建镜像 %s ...", image)
+        build = await asyncio.create_subprocess_exec(
+            "docker", "build", "-t", image, str(pipeline_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert build.stdout is not None
+        log_path = DATA_DIR / "builds" / f"{image.replace('/', '_')}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("wb") as f:
+            while True:
+                chunk = await build.stdout.read(8192)
+                if not chunk:
+                    break
+                f.write(chunk)
+        rc = await build.wait()
+        if rc != 0:
+            raise ExecutorError(f"镜像构建失败（exit {rc}）：{image}，日志见 {log_path}")
+        await _cleanup_old_tags(image)
 
 
 async def run_pipeline(
@@ -254,6 +294,9 @@ async def run_pipeline(
     steps: list[str] = manifest["steps"]
     pipeline_dir = Path(pipeline.source_dir)
     timeout = int(manifest.get("timeout", DEFAULT_TIMEOUT))
+    # 运行时实时解析镜像：改了 Dockerfile/assets 不 refresh 也用对 tag，且不受
+    # DB 中过期 image 字段影响（那字段仅供 Web 展示）。
+    image = resolve_image(pipeline_dir, manifest)
 
     rdir = run_dir(run_id)
     workdir = rdir / "work"
@@ -277,7 +320,7 @@ async def run_pipeline(
         session.commit()
 
     try:
-        await ensure_image(pipeline.image, pipeline_dir)
+        await ensure_image(image, pipeline_dir)
     except ExecutorError as e:
         await _fail_run(run_id, str(e), pipeline)
         return
@@ -308,7 +351,7 @@ async def run_pipeline(
             log.info("run %s 步骤 %d/%d: %s", run_id, idx, len(steps), step_file)
             try:
                 rc = await docker_run(
-                    pipeline.image,
+                    image,
                     pipeline_dir=pipeline_dir,
                     workdir=workdir,
                     run_dir=rdir,

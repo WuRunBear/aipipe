@@ -19,13 +19,26 @@ class RegistryError(Exception):
     pass
 
 
+_DOCKERFILE_INPUTS = ("assets",)
+
+
 def dirhash(pipeline_dir: Path, length: int = 12) -> str:
-    """目录内容哈希（文件名+字节），用于 Dockerfile 流水线镜像 tag。"""
+    """Dockerfile 流水线镜像 tag：只哈希镜像真实依赖的输入。
+
+    steps/*.py、requirements.txt 等是运行时以 ro 挂载到 /pipeline 的，不烤进镜像，
+    不参与哈希（否则改一行 step 或本地生成的 __pycache__/*.pyc 会让 tag 漂移，
+    触发无意义的重建）。镜像内容仅取决于 Dockerfile 及其 COPY 的文件——约定上
+    流水线若需把文件烤进镜像，统一放 assets/。
+    """
     h = hashlib.sha256()
-    for p in sorted(pipeline_dir.rglob("*")):
-        if p.is_file():
-            h.update(str(p.relative_to(pipeline_dir)).encode())
-            h.update(p.read_bytes())
+    h.update((pipeline_dir / "Dockerfile").read_bytes())
+    for name in _DOCKERFILE_INPUTS:
+        d = pipeline_dir / name
+        if d.is_dir():
+            for p in sorted(d.rglob("*")):
+                if p.is_file():
+                    h.update(str(p.relative_to(pipeline_dir)).encode())
+                    h.update(p.read_bytes())
     return h.hexdigest()[:length]
 
 
