@@ -11,11 +11,17 @@ RUN apt-get update \
 
 # 沙箱运行契约：--read-only 下 root HOME 不可写，HOME 置于 tmpfs /tmp。
 # 该镜像 conda python 在 /opt/conda/bin（自带 ENV PATH），无需另行声明。
+# demucs 4.x 权重走 HuggingFace Hub 缓存（HF_HOME=/opt/hf，同 image-caption 的预烘模式）。
 RUN useradd -u 1000 aipipe
 ENV HOME=/tmp \
     PYTHONDONTWRITEBYTECODE=1 \
-    TORCH_HOME=/opt/demucs_weights
+    HF_HOME=/opt/hf
 
-# 全部 Python 依赖在 build 期安装；demucs 权重预烘到镜像内（沙箱 --read-only 不可重下）
+# 全部 Python 依赖在 build 期安装；demucs htdemucs 权重经 get_model 预烘到 HF 缓存
+# （沙箱 --read-only 根下不可重下，运行时 HF_HUB_OFFLINE=1 只读离线读）。
+# 注意：demucs 4.1.0 起 CLI 必须传 tracks 且 --repo 改为只读本地仓，无法再靠跑 CLI 预烘。
 RUN pip install --no-cache-dir yt-dlp "openai<3" demucs \
-    && python -m demucs -n htdemucs --repo /opt/demucs_weights
+    && python -c "from demucs.pretrained import get_model; m=get_model('htdemucs'); print('[prebake] htdemucs ok:', getattr(m,'models',None) and len(m.models))"
+
+# 运行期只读离线读缓存（避免 read-only /opt/hf 下 hf 尝试写锁/联网校验）
+ENV HF_HUB_OFFLINE=1

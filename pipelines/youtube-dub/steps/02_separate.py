@@ -19,12 +19,12 @@ if not src.is_file():
 out_dir = work / "separated"
 out_dir.mkdir(parents=True, exist_ok=True)
 
-# demucs CLI 直接接收 mp4，内部用 ffmpeg 解码出音频再分离
+# demucs CLI 直接接收 mp4，内部用 ffmpeg 解码出音频再分离；
+# 模型走镜像预烘的 HF 缓存（HF_HOME=/opt/hf + HF_HUB_OFFLINE=1），不传 --repo
 cmd = [
     "python", "-m", "demucs",
     "--two-stems", "vocals",
     "-n", "htdemucs",
-    "--repo", "/opt/demucs_weights",   # 镜像预烘焙路径（read-only 根下不重下）
     "-o", str(out_dir),
     str(src),
 ]
