@@ -20,8 +20,9 @@ ENV HOME=/tmp \
 # 全部 Python 依赖在 build 期安装；demucs htdemucs 权重经 get_model 预烘到 HF 缓存
 # （沙箱 --read-only 根下不可重下，运行时 HF_HUB_OFFLINE=1 只读离线读）。
 # 注意：demucs 4.1.0 起 CLI 必须传 tracks 且 --repo 改为只读本地仓，无法再靠跑 CLI 预烘。
-# yt-dlp[default] 含 curl_cffi → YouTube 自动 impersonation，降低被 bot 检测/限流概率。
-RUN pip install --no-cache-dir "yt-dlp[default]" "openai<3" demucs \
+# yt-dlp 需带 extras：curl-cffi（YouTube 自动 impersonation 伪装浏览器，抗 403/限流，
+# 注意不在 [default] 里）、deno（JS 运行时，格式提取完整）、default（brotli/certifi 等）。
+RUN pip install --no-cache-dir "yt-dlp[default,curl-cffi,deno]" "openai<3" demucs \
     && python -c "from demucs.pretrained import get_model; m=get_model('htdemucs'); print('[prebake] htdemucs ok:', getattr(m,'models',None) and len(m.models))"
 
 # 运行期只读离线读缓存（避免 read-only /opt/hf 下 hf 尝试写锁/联网校验）
