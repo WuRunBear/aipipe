@@ -20,6 +20,12 @@ const preview = ref(null)
 const previewError = ref('')
 const previewing = ref(null)
 const zoomed = ref(false)
+const packing = ref(false)
+
+function onArchive() {
+  packing.value = true
+  setTimeout(() => (packing.value = false), 15000)
+}
 
 const KIND_ICON = {
   video: { ico: '🎬', bg: '#2c1e3f', color: '#c39bff' },
@@ -123,6 +129,17 @@ onUnmounted(() => {
         </template>
       </div>
 
+      <div class="toolbar">
+        <a
+          class="btn ghost"
+          :class="{ disabled: packing }"
+          :href="api.artifactArchiveUrl(runId, currentDir)"
+          download
+          @click="onArchive"
+        >{{ packing ? '打包中…（大目录需等待）' : `打包下载${currentDir ? '（当前目录）' : '（全部）'}` }}</a>
+        <span class="hint">zip 打包下载；图片较多时服务端需要一点时间，等待期间浏览器无响应属正常</span>
+      </div>
+
       <div v-for="a in artifacts" :key="a.path" class="artifact">
         <span class="ico" :style="{ background: meta(a.kind).bg, color: meta(a.kind).color }">
           {{ meta(a.kind).ico }}
@@ -216,6 +233,21 @@ onUnmounted(() => {
   border: none;
   text-align: left;
   cursor: pointer;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.toolbar .hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.toolbar a.disabled {
+  pointer-events: none;
+  opacity: 0.55;
 }
 
 .overlay {

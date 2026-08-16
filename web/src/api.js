@@ -72,6 +72,8 @@ export const api = {
     request(`/runs/${id}/artifacts` + (dir ? `?dir=${encodeURIComponent(dir)}` : '')),
   artifactDownloadUrl: (id, path) =>
     `${API_BASE}/runs/${id}/artifacts/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(auth.token)}`,
+  artifactArchiveUrl: (id, dir) =>
+    `${API_BASE}/runs/${id}/artifacts/archive?dir=${encodeURIComponent(dir || '')}&token=${encodeURIComponent(auth.token)}`,
   previewArtifact: (id, path) =>
     request(`/runs/${id}/artifacts/preview?path=${encodeURIComponent(path)}`),
   systemInfo: () => request('/system/info'),
