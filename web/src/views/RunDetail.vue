@@ -81,6 +81,14 @@ function fullLogs() {
   window.open(api.logsUrl(runId), '_blank')
 }
 
+function stopRun() {
+  if (!confirm('停止本次运行？（正在执行的步骤会被强杀）')) return
+  api
+    .stopRun(runId)
+    .then(() => loadRun())
+    .catch((e) => (error.value = e.message))
+}
+
 function rerunFrom(stepIndex) {
   if (!confirm(`从第 ${stepIndex} 步重新运行？（会复制本运行的工作目录，产物保留）`)) return
   api
@@ -168,6 +176,7 @@ onUnmounted(() => {
 
       <div style="display: flex; gap: 10px; margin-top: 14px">
         <button class="btn ghost" @click="fullLogs">完整日志</button>
+        <button v-if="!terminal" class="btn danger" @click="stopRun">停止运行</button>
         <button class="btn" @click="router.push(`/runs/${runId}/artifacts`)">查看产物</button>
       </div>
     </template>

@@ -8,8 +8,8 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from ..auth import AuthUser, AuthUserAny
 from ..config import DATA_DIR
-from ..executor import ParamsError, run_pipeline, validate_params
-from ..models import Pipeline, Run, SessionLocal, StepRun
+from ..executor import ParamsError, request_stop_run, run_pipeline, validate_params
+from ..models import Pipeline, Run, SessionLocal, StepRun, utcnow
 from ..registry import load_manifest
 from ..executor import run_dir as _run_dir
 
@@ -48,8 +48,52 @@ async def create_run(pipeline_id: int, body: dict | None = None, _user: str = Au
     return {"id": run_id, "status": "queued", "pipeline_id": pipeline_id, "params": params}
 
 
-def _run_to_dict(run: Run) -> dict:
-    return {
+@router.post("/runs/{run_id}/stop")
+async def stop_run(run_id: str, _user: str = AuthUser) -> dict:
+    """停止运行：置停止标记并强杀本运行正在跑的容器。
+
+    排队中：直接标记失败；运行中：置标记 + docker kill（容器非零退出后
+    执行器会把失败原因标记为"用户停止"）。
+    """
+    with SessionLocal() as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            raise HTTPException(404, "运行不存在")
+        status = run.status
+        prefix = f"aipipe-{run_id[:12]}-"
+
+    if status in ("success", "failed"):
+        raise HTTPException(400, "运行已结束")
+    request_stop_run(run_id)
+
+    if status == "queued":
+        with SessionLocal() as session:
+            run = session.get(Run, run_id)
+            run.status = "failed"
+            run.error = "用户停止（排队中）"
+            run.finished_at = utcnow()
+            session.commit()
+        return {"status": "stopped"}
+
+    # 运行中：强杀本运行的全部容器（当前步骤 + 可能的残留）
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "ps", "--filter", f"name={prefix}", "--format", "{{.ID}}", "-q",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        for cid in (out or b"").decode().split():
+            kill = await asyncio.create_subprocess_exec(
+                "docker", "kill", cid,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await kill.wait()
+    except Exception:  # noqa: BLE001  强杀失败不影响停止标记
+        pass
+    return {"status": "stopping"}
+
+
+def _run_to_dict(run: Run) -> dict:    return {
         "id": run.id,
         "pipeline_id": run.pipeline_id,
         "params": json.loads(run.params_json or "{}"),
@@ -159,8 +203,12 @@ async def rerun_run(
 
 
 @router.get("/runs/{run_id}/logs", response_class=PlainTextResponse)
-def get_run_logs(run_id: str, _user: str = AuthUser) -> str:
-    """拼接全部步骤日志（纯文本）。"""
+def get_run_logs(run_id: str, _user: str = AuthUserAny) -> str:
+    """拼接全部步骤日志（纯文本）。
+
+    新标签页 window.open 无法带 Authorization header，故放宽为 header 或
+    query `token`（见 require_auth_any）。
+    """
     logs_dir = _run_dir(run_id) / "logs"
     if not logs_dir.is_dir():
         return ""

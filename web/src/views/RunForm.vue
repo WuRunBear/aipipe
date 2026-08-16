@@ -113,6 +113,7 @@ onMounted(load)
             :id="`p-${key}`"
             v-model.number="form[key]"
             type="number"
+            step="any"
             :placeholder="specOf(specRaw).default ?? ''"
           />
           <input

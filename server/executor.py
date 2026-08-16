@@ -287,12 +287,26 @@ async def _cleanup_old_tags(image: str) -> None:
 
 _build_locks: dict[str, asyncio.Lock] = {}
 
+# 停止标记：API 层 request_stop_run 置位；run_pipeline 在步骤边界检查，
+# 容器被强杀返回非零时据此把失败原因标记为"用户停止"而非步骤失败。
+_stop_flags: dict[str, bool] = {}
 
-async def ensure_image(image: str, pipeline_dir: Path) -> None:
+
+def request_stop_run(run_id: str) -> None:
+    _stop_flags[run_id] = True
+
+
+def is_stop_requested(run_id: str) -> bool:
+    return _stop_flags.get(run_id, False)
+
+
+async def ensure_image(image: str, pipeline_dir: Path, build_network: str | None = None) -> None:
     """镜像不存在时构建（仅 Dockerfile 流水线有意义）；构建失败抛错。
 
     按 tag 加锁避免并发 run 同时构建；双检已存在则跳过；构建成功后清理同
     流水线旧 tag。
+    build_network: 清单 build_network 字段（如 "host"），构建时附加
+    `--network <x>`；用于 build 期访问宿主机代理等（默认桥网络到不了宿主 127.0.0.1）。
     """
     # 快速路径：已存在直接返回（不加锁）
     if await _image_exists(image):
@@ -304,8 +318,12 @@ async def ensure_image(image: str, pipeline_dir: Path) -> None:
         if await _image_exists(image):
             return  # 别的并发任务已建好
         log.info("构建镜像 %s ...", image)
+        build_cmd = ["docker", "build", "-t", image]
+        if build_network:
+            build_cmd += ["--network", build_network]
+        build_cmd.append(str(pipeline_dir))
         build = await asyncio.create_subprocess_exec(
-            "docker", "build", "-t", image, str(pipeline_dir),
+            *build_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -361,6 +379,10 @@ async def run_pipeline(
 
     secrets = read_secrets(manifest)
 
+    if is_stop_requested(run_id):
+        await _fail_run(run_id, "用户停止", pipeline)
+        return
+
     with SessionLocal() as session:
         run = session.get(Run, run_id)
         run.status = "running"
@@ -369,13 +391,19 @@ async def run_pipeline(
         session.commit()
 
     try:
-        await ensure_image(image, pipeline_dir)
+        await ensure_image(image, pipeline_dir, build_network=manifest.get("build_network"))
     except ExecutorError as e:
         await _fail_run(run_id, str(e), pipeline)
+        return
+    if is_stop_requested(run_id):
+        await _fail_run(run_id, "用户停止", pipeline)
         return
 
     try:
         for idx, step_file in enumerate(steps, start=1):
+            if is_stop_requested(run_id):
+                await _fail_run(run_id, "用户停止", pipeline)
+                return
             if idx < from_step:
                 log.info("run %s 跳过步骤 %d/%d: %s（from_step=%d）", run_id, idx, len(steps), step_file, from_step)
                 continue
@@ -424,11 +452,17 @@ async def run_pipeline(
                 _finish_step(step_run_id, "success", 0)
             elif rc == TIMEOUT_RC:
                 _finish_step(step_run_id, "failed", TIMEOUT_RC)
-                await _fail_run(run_id, f"步骤 {step_file} 超时（>{timeout}s）", pipeline)
+                if is_stop_requested(run_id):
+                    await _fail_run(run_id, "用户停止", pipeline)
+                else:
+                    await _fail_run(run_id, f"步骤 {step_file} 超时（>{timeout}s）", pipeline)
                 return
             else:
                 _finish_step(step_run_id, "failed", rc)
-                await _fail_run(run_id, f"步骤 {step_file} 失败（exit {rc}）", pipeline)
+                if is_stop_requested(run_id):
+                    await _fail_run(run_id, "用户停止", pipeline)
+                else:
+                    await _fail_run(run_id, f"步骤 {step_file} 失败（exit {rc}）", pipeline)
                 return
 
         with SessionLocal() as session:
@@ -437,6 +471,7 @@ async def run_pipeline(
             run.finished_at = utcnow()
             session.commit()
         log.info("run %s 全部步骤成功", run_id)
+        _stop_flags.pop(run_id, None)
         await notify_webhook(run_id, pipeline, "success", "")
     except Exception as e:  # noqa: BLE001 兜底
         log.exception("run %s 异常终止", run_id)
@@ -476,6 +511,7 @@ def _finish_step(step_run_id: int, status: str, exit_code: int) -> None:
 
 async def _fail_run(run_id: str, message: str, pipeline) -> None:
     log.warning("run %s 失败: %s", run_id, message)
+    _stop_flags.pop(run_id, None)
     with SessionLocal() as session:
         run = session.get(Run, run_id)
         run.status = "failed"

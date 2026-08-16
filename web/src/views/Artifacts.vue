@@ -13,6 +13,7 @@ function goBack() {
 }
 
 const artifacts = ref([])
+const currentDir = ref('')
 const loading = ref(true)
 const error = ref('')
 const preview = ref(null)
@@ -24,6 +25,7 @@ const KIND_ICON = {
   image: { ico: '🖼', bg: '#3a2c1e', color: '#ffd28a' },
   text: { ico: '📄', bg: '#1e2f3a', color: '#8ac8ff' },
   archive: { ico: '📦', bg: '#3a2c2c', color: '#ff9d9d' },
+  dir: { ico: '📁', bg: '#262b36', color: '#b9c6e0' },
   other: { ico: '📁', bg: '#262b36', color: '#b9c6e0' },
 }
 
@@ -31,9 +33,19 @@ function meta(kind) {
   return KIND_ICON[kind] || KIND_ICON.other
 }
 
+function crumbParts() {
+  if (!currentDir.value) return []
+  return currentDir.value.split('/').filter(Boolean)
+}
+
+function crumbPath(idx) {
+  return crumbParts().slice(0, idx + 1).join('/')
+}
+
 async function load() {
+  loading.value = true
   try {
-    const data = await api.listArtifacts(runId)
+    const data = await api.listArtifacts(runId, currentDir.value)
     artifacts.value = data.artifacts
     error.value = ''
   } catch (e) {
@@ -43,6 +55,16 @@ async function load() {
   }
 }
 
+function openDir(dir) {
+  currentDir.value = dir
+  load()
+}
+
+function goRoot() {
+  currentDir.value = ''
+  load()
+}
+
 function isMedia(kind) {
   return kind === 'video' || kind === 'audio'
 }
@@ -50,6 +72,7 @@ function isMedia(kind) {
 async function showPreview(a) {
   previewing.value = a
   preview.value = null
+  if (a.kind === 'image') return
   try {
     preview.value = await api.previewArtifact(runId, a.path)
   } catch (e) {
@@ -70,16 +93,29 @@ onMounted(load)
     <div v-if="loading" class="empty">加载中…</div>
     <div v-else-if="artifacts.length === 0" class="empty">暂无产物（运行中的流水线产物会实时出现）</div>
     <div v-else>
+      <div class="crumb" v-if="currentDir">
+        <button class="crumb-link" @click="goRoot">/work</button>
+        <template v-for="(part, i) in crumbParts()" :key="i">
+          <span class="crumb-sep">/</span>
+          <button v-if="i < crumbParts().length - 1" class="crumb-link" @click="openDir(crumbPath(i))">{{ part }}</button>
+          <span v-else class="crumb-here">{{ part }}</span>
+        </template>
+      </div>
+
       <div v-for="a in artifacts" :key="a.path" class="artifact">
         <span class="ico" :style="{ background: meta(a.kind).bg, color: meta(a.kind).color }">
           {{ meta(a.kind).ico }}
         </span>
-        <div class="body">
+        <button v-if="a.kind === 'dir'" class="body dir-row" @click="openDir(a.path)">
+          <div class="name">{{ a.name }}/</div>
+        </button>
+        <div v-else class="body">
           <div class="name">{{ a.name }}</div>
           <div class="size">{{ fmtSize(a.size) }}</div>
         </div>
-        <div class="act">
+        <div class="act" v-if="a.kind !== 'dir'">
           <button v-if="a.kind === 'text'" @click="showPreview(a)">预览</button>
+          <button v-if="a.kind === 'image'" @click="showPreview(a)">预览</button>
           <button v-if="isMedia(a.kind)" @click="showPreview(a)">播放</button>
           <a :href="api.artifactDownloadUrl(runId, a.path)" download>下载</a>
         </div>
@@ -99,9 +135,48 @@ onMounted(load)
           style="width: 100%"
           :src="api.artifactDownloadUrl(runId, previewing.path)"
         ></audio>
+        <img
+          v-else-if="previewing.kind === 'image'"
+          :src="api.artifactDownloadUrl(runId, previewing.path)"
+          style="width: 100%; border-radius: 10px; background: #000"
+          alt=""
+        />
         <pre v-else-if="preview && !preview.binary" class="preview">{{ preview.content }}<span v-if="preview.truncated" style="color: var(--muted)">&#10;…（内容过长，已截断）</span></pre>
         <div v-else class="empty">二进制文件，请下载查看</div>
       </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  background: var(--card);
+  border-radius: 10px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.crumb-link {
+  color: var(--accent);
+  background: none;
+  border: none;
+  font-size: 14px;
+}
+.crumb-sep {
+  color: var(--muted);
+}
+.crumb-here {
+  font-size: 14px;
+  color: var(--text);
+}
+.dir-row {
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+</style>

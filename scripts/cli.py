@@ -7,6 +7,7 @@
   aipipe run <pipeline_id|name> -p k=v [-p k2=v2]
   aipipe logs <run_id> [-f]          # 纯文本；-f 用 SSE 实时跟随
   aipipe rerun <run_id> --from N
+  aipipe stop <run_id>
   aipipe status <run_id>
   aipipe artifacts <run_id>          # 列出产物
 
@@ -207,6 +208,12 @@ def cmd_rerun(args) -> int:
     return 0
 
 
+def cmd_stop(args) -> int:
+    r = request("POST", f"/runs/{args.run_id}/stop")
+    print(f"已请求停止: {args.run_id}（{r['status']}）")
+    return 0
+
+
 def cmd_artifacts(args) -> int:
     data = request("GET", f"/runs/{args.run_id}/artifacts")
     items = data.get("artifacts", [])
@@ -249,6 +256,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("run_id")
     p.add_argument("--from", dest="from_step", type=int, default=1)
     p.set_defaults(func=cmd_rerun)
+
+    p = sub.add_parser("stop", help="停止运行")
+    p.add_argument("run_id")
+    p.set_defaults(func=cmd_stop)
 
     p = sub.add_parser("artifacts", help="产物列表")
     p.add_argument("run_id")

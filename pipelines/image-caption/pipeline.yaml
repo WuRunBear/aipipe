@@ -1,0 +1,18 @@
+name: image-caption
+description: 批量给图片生成 Lora 训练标注（自然语言 / danbooru tags）
+env: [OPENAI_API_KEY, OPENAI_BASE_URL]
+timeout: 7200
+build_network: host   # build 期走宿主机网络/代理下载 tagger 模型烤进镜像（运行期离线）
+params:
+  input_dir:        {type: path, required: true, mount: /input/images, hint: 图片文件夹（只读挂载）}
+  natural:          {type: boolean, default: true,  hint: 自然语言描述（OpenRouter 视觉模型）}
+  tags:             {type: boolean, default: false, hint: danbooru tags（本地 wd-swinv2-tagger-v3）}
+  trigger_word:     {type: string, default: "",     hint: 触发词，非空时作为标注前缀（如 sks）}
+  natural_lang:     {type: string, default: "en",   hint: 自然语言标注语言 en/zh"}
+  vision_model:     {type: string, default: "qwen/qwen3.7-flash", hint: 视觉模型（OpenRouter 模型名）}
+  tag_threshold:    {type: number, default: 0.35,   hint: general tags 置信度阈值}
+  character_threshold: {type: number, default: 0.85, hint: 角色 tag 置信度阈值}
+steps:
+  - 01_prepare.py
+  - 02_caption.py
+  - 03_report.py

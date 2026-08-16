@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from ..auth import AuthUser
+from ..auth import AuthUser, AuthUserAny
 from ..executor import run_dir
 from ..models import Run, SessionLocal
 
@@ -53,44 +53,71 @@ def _ensure_run(run_id: str) -> None:
             raise HTTPException(404, "运行不存在")
 
 
-def _scan_artifacts(run_id: str) -> list[dict]:
-    workdir = run_dir(run_id) / "work"
-    items: list[dict] = []
+def _scan_artifacts(run_id: str, dir: str = "") -> list[dict]:
+    workdir = (run_dir(run_id) / "work").resolve()
     if not workdir.is_dir():
-        return items
-    for p in sorted(workdir.iterdir()):
-        if not p.is_file() or p.name.startswith("."):
+        return []
+    base = (workdir / dir).resolve() if dir else workdir
+    if base != workdir and not str(base).startswith(str(workdir) + "/"):
+        raise HTTPException(404, "目录不存在")
+    if not base.is_dir():
+        raise HTTPException(404, "目录不存在")
+    dirs: list[dict] = []
+    items: list[dict] = []
+    for p in sorted(base.iterdir()):
+        if p.name.startswith("."):
             continue
-        if p.name in EXCLUDE_NAMES or p.suffix.lower() in EXCLUDE_SUFFIX:
-            continue
+        rel = str(p.relative_to(workdir))
         stat = p.stat()
-        items.append(
-            {
-                "name": p.name,
-                "path": p.name,
-                "size": stat.st_size,
-                "kind": _artifact_kind(p.name),
-                "modified": stat.st_mtime,
-            }
-        )
-    return items
+        if p.is_dir():
+            dirs.append(
+                {
+                    "name": p.name,
+                    "path": rel,
+                    "kind": "dir",
+                    "size": 0,
+                    "modified": stat.st_mtime,
+                }
+            )
+        elif p.is_file():
+            if p.name in EXCLUDE_NAMES or p.suffix.lower() in EXCLUDE_SUFFIX:
+                continue
+            items.append(
+                {
+                    "name": p.name,
+                    "path": rel,
+                    "size": stat.st_size,
+                    "kind": _artifact_kind(p.name),
+                    "modified": stat.st_mtime,
+                }
+            )
+    return dirs + items
 
 
 @router.get("/runs/{run_id}/artifacts")
-def list_artifacts(run_id: str, _user: str = AuthUser) -> dict:
+def list_artifacts(
+    run_id: str,
+    dir: str = Query("", description="work/ 下相对目录，空为根目录"),
+    _user: str = AuthUser,
+) -> dict:
     _ensure_run(run_id)
-    return {"artifacts": _scan_artifacts(run_id)}
+    return {"artifacts": _scan_artifacts(run_id, dir), "dir": dir}
 
 
 @router.get("/runs/{run_id}/artifacts/download")
 def download_artifact(
     run_id: str, path: str = Query(..., description="work/ 下相对路径"),
-    _user: str = AuthUser,
+    _user: str = AuthUserAny,
 ) -> FileResponse:
+    """下载产物（也可作 `<img>/<video>/<audio>` 内联源）。
+
+    `<img>` 等元素无法带 Authorization header，故放宽为 header 或 query `token`
+    （见 require_auth_any）；不带 filename 避免强制 attachment，图片可内联预览。
+    """
     _ensure_run(run_id)
     target = _safe_work_path(run_id, path)
     media = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-    return FileResponse(target, media_type=media, filename=target.name)
+    return FileResponse(target, media_type=media)
 
 
 @router.get("/runs/{run_id}/artifacts/preview")
