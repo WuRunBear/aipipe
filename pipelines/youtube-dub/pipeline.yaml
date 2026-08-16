@@ -11,9 +11,9 @@ params:
   target_lang:   {type: string, default: "zh"}
   sub_langs:     {type: string, default: "en", hint: 下载的字幕语言（逗号分隔，如 en,zh-Hans）}
   translate_model: {type: string, default: "deepseek/deepseek-v3.2", hint: 翻译模型完整 ID（网关要求全名，如 deepseek/deepseek-v3.2）}
-  tts_model:     {type: string, default: "tts-1", hint: TTS 模型名}
-  tts_base_url:  {type: string, default: "", hint: TTS 服务地址（留空则用 env TTS_BASE_URL/OPENAI_BASE_URL）}
-  tts_voice:     {type: string, default: "", hint: TTS 音色（留空则用 env TTS_VOICE 或按语言默认）}
+  tts_model:     {type: string, hint: TTS 模型名（留空用 env TTS_MODEL，默认 tts-1）}
+  tts_base_url:  {type: string, hint: TTS 服务地址（留空用 env TTS_BASE_URL/OPENAI_BASE_URL）}
+  tts_voice:     {type: string, hint: TTS 音色（留空用 env TTS_VOICE 或按语言默认）}
   burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
   dub_volume:    {type: number, default: 1.0, hint: 配音音量（amix 前的 volume 滤镜）}
   bgm_volume:    {type: number, default: 0.6, hint: 背景音音量}
