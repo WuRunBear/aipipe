@@ -64,6 +64,11 @@ BASE_CMD = [
     "-o", "/work/video.%(ext)s",
     "--no-playlist",
 ]
+# YOUTUBE_COOKIES_FILE（restricted.env 的 *_FILE 约定）：执行器自动只读挂载，
+# 值即容器内路径；有登录态 cookies 可绕开 "Sign in to confirm you're not a bot"。
+cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE")
+if cookies_file:
+    BASE_CMD += ["--cookies", cookies_file]
 
 # googlevideo 视频流被 403 时，换 player_client 拿不同的流 URL 重试（不同 client 的
 # 签名/CDN 路径不同，常能绕过某一 client 的封禁）。诊断结论：HTTPS 直链格式（如

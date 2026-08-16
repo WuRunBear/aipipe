@@ -112,6 +112,14 @@ sudo systemctl restart docker
 
 清单 `params:` 里 `type: path` 的参数，触发时由执行器把用户传入的宿主绝对路径**只读挂载**到容器内（清单 `mount:` 字段声明的挂载点）。无需先把文件上传到 `/work/`。
 
+## `*_FILE` 环境变量约定（restricted.env 宿主文件自动挂载）
+
+`restricted.env` 里任何以 `_FILE` 结尾的 key 视为**宿主文件路径**：执行器校验路径存在后自动只读挂载到容器 `/input/<KEY>`，注入的 env 值改写为容器内挂载点路径（并 best-effort `chmod 644` 保证容器 uid 1000 可读）。
+
+- 值非绝对路径或文件不存在 → warning 且移除该 key（流水线不带此文件运行，不阻塞）
+- 典型用途：`YOUTUBE_COOKIES_FILE=/<repo>/data/cookies/youtube.txt`（yt-dlp 登录态 cookies，需流水线在 `env:` 声明该 key）
+- 更新文件 = 覆盖原路径，无需改配置
+
 ```yaml
 params:
   intro_video:

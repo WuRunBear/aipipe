@@ -403,6 +403,31 @@ async def run_pipeline(
 
     secrets = read_secrets(manifest)
 
+    # *_FILE 约定：restricted.env 里以 _FILE 结尾的 key 视为宿主文件路径，
+    # 自动只读挂载到容器 /input/<KEY>，env 值改写为容器内挂载点路径。
+    # 路径非法/文件不存在 → warning + 移除该 key（流水线不带此文件运行，不硬卡死）。
+    file_mounts: list[tuple[Path, str]] = []
+    for key in list(secrets):
+        if not key.endswith("_FILE"):
+            continue
+        host = Path(secrets[key]).expanduser()
+        mount = f"/input/{key}"
+        if not host.is_absolute() or any(_is_subpath(mount, sp) for sp in _SANDBOX_PATHS):
+            log.warning("env %s 的值不是合法宿主文件路径，忽略：%s", key, host)
+            del secrets[key]
+            continue
+        if not host.is_file():
+            log.warning("env %s 指向的文件不存在，忽略（该流水线将不带此文件运行）：%s", key, host)
+            del secrets[key]
+            continue
+        try:
+            host.chmod(0o644)  # 容器内以 uid 1000 运行，保证可读（best effort）
+        except OSError:
+            pass
+        file_mounts.append((host, mount))
+        secrets[key] = mount
+    path_mounts = (path_mounts or []) + file_mounts
+
     if is_stop_requested(run_id):
         await _fail_run(run_id, "用户停止", pipeline)
         return
