@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api, fmtSize } from '../api'
 
@@ -17,7 +17,9 @@ const currentDir = ref('')
 const loading = ref(true)
 const error = ref('')
 const preview = ref(null)
+const previewError = ref('')
 const previewing = ref(null)
+const zoomed = ref(false)
 
 const KIND_ICON = {
   video: { ico: '🎬', bg: '#2c1e3f', color: '#c39bff' },
@@ -72,15 +74,34 @@ function isMedia(kind) {
 async function showPreview(a) {
   previewing.value = a
   preview.value = null
-  if (a.kind === 'image') return
+  previewError.value = ''
+  zoomed.value = false
+  if (a.kind === 'image' || isMedia(a.kind)) return
   try {
     preview.value = await api.previewArtifact(runId, a.path)
   } catch (e) {
-    error.value = e.message
+    previewError.value = e.message
   }
 }
 
-onMounted(load)
+function closePreview() {
+  previewing.value = null
+  preview.value = null
+  previewError.value = ''
+}
+
+function onKey(e) {
+  if (e.key === 'Escape') closePreview()
+}
+
+onMounted(() => {
+  load()
+  window.addEventListener('keydown', onKey)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+})
 </script>
 
 <template>
@@ -120,30 +141,47 @@ onMounted(load)
           <a :href="api.artifactDownloadUrl(runId, a.path)" download>下载</a>
         </div>
       </div>
+    </div>
 
-      <template v-if="previewing">
-        <h2 class="section-title">预览：{{ previewing.name }}</h2>
+    <!-- 全屏预览弹窗 -->
+    <div v-if="previewing" class="overlay" @click.self="closePreview">
+      <div class="ov-head">
+        <span class="ov-title">{{ previewing.name }}</span>
+        <button
+          v-if="previewing.kind === 'image'"
+          class="ov-btn"
+          @click="zoomed = !zoomed"
+        >{{ zoomed ? '适应' : '原尺寸' }}</button>
+        <a class="ov-btn" :href="api.artifactDownloadUrl(runId, previewing.path)" download>下载</a>
+        <button class="ov-close" @click="closePreview">✕</button>
+      </div>
+      <div class="ov-body" :class="{ center: previewing.kind === 'image' }">
         <video
           v-if="previewing.kind === 'video'"
-          controls
-          style="width: 100%; border-radius: 10px; background: #000"
+          controls autoplay
+          class="ov-media"
           :src="api.artifactDownloadUrl(runId, previewing.path)"
         ></video>
         <audio
           v-else-if="previewing.kind === 'audio'"
-          controls
-          style="width: 100%"
+          controls autoplay
+          class="ov-audio"
           :src="api.artifactDownloadUrl(runId, previewing.path)"
         ></audio>
         <img
           v-else-if="previewing.kind === 'image'"
+          :class="zoomed ? 'img-full' : 'img-fit'"
           :src="api.artifactDownloadUrl(runId, previewing.path)"
-          style="width: 100%; border-radius: 10px; background: #000"
           alt=""
         />
-        <pre v-else-if="preview && !preview.binary" class="preview">{{ preview.content }}<span v-if="preview.truncated" style="color: var(--muted)">&#10;…（内容过长，已截断）</span></pre>
-        <div v-else class="empty">二进制文件，请下载查看</div>
-      </template>
+        <template v-else-if="previewing.kind === 'text'">
+          <div v-if="previewError" class="empty">{{ previewError }}</div>
+          <div v-else-if="!preview" class="empty">加载中…</div>
+          <pre v-else-if="!preview.binary" class="preview">{{ preview.content }}<span v-if="preview.truncated" style="color: var(--muted)">&#10;…（内容过长，已截断）</span></pre>
+          <div v-else class="empty">二进制文件，请下载查看</div>
+        </template>
+        <div v-else class="empty">此类型暂不支持预览，请下载查看</div>
+      </div>
     </div>
   </div>
 </template>
@@ -178,5 +216,93 @@ onMounted(load)
   border: none;
   text-align: left;
   cursor: pointer;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(6, 10, 18, 0.94);
+  display: flex;
+  flex-direction: column;
+}
+.ov-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.ov-title {
+  flex: 1;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-btn {
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-decoration: none;
+}
+.ov-close {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 18px;
+  padding: 4px 8px;
+}
+.ov-body {
+  flex: 1;
+  overflow: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ov-body.center {
+  align-items: center;
+  justify-content: center;
+}
+.ov-media {
+  width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  background: #000;
+}
+.ov-audio {
+  width: 100%;
+  margin: auto 0;
+}
+.img-fit {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #000;
+}
+.img-full {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  border-radius: 4px;
+  background: #000;
+}
+.preview {
+  margin: 0;
+  width: 100%;
+  padding: 12px;
+  background: var(--card);
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+  overflow-x: auto;
 }
 </style>

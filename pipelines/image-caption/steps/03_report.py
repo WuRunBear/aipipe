@@ -1,4 +1,7 @@
-"""步骤 3/3：核对标注完整性 → report.txt（存在缺失则非零退出，提示 rerun --from 2 补缺）。"""
+"""步骤 3/3：核对标注完整性 → report.txt（存在缺失则非零退出，提示 rerun --from 2 补缺）。
+
+每个风格目录（dataset/natural、dataset/tags）内图片与 <stem>.txt 配对。
+"""
 import json
 import os
 from pathlib import Path
@@ -13,7 +16,7 @@ index = json.loads((work / "index.json").read_text(encoding="utf-8"))
 
 
 def ok(style: str, rel: str) -> bool:
-    p = dataset / style / (rel + ".txt")
+    p = dataset / style / (os.path.splitext(rel)[0] + ".txt")
     return p.is_file() and p.stat().st_size > 0
 
 

@@ -1,9 +1,11 @@
-"""步骤 2/3：按开关打标 → /work/dataset/{natural,tags}/<rel>.txt。
+"""步骤 2/3：按开关打标 → /work/dataset/{natural,tags}/<stem>.txt。
 
-natural：OpenRouter 视觉模型（自定义 VisionCaptionAction，ThreadPool 并发 + 重试退避）。
-tags：dghs-imgutils 的 get_wd14_tags（wd-swinv2-tagger-v3，onnxruntime），
-      即 waifuc TaggingAction 底层引擎，行为一致（general/character 阈值 + rating 剔除）。
+每个风格一个目录，图片与标注 txt 同目录（如 dataset/tags/10.png + dataset/tags/10.txt），
+目录自包含可直接喂训练工具。natural 走 OpenRouter 视觉模型（ThreadPool 并发 + 重试退避）；
+tags 走 dghs-imgutils 的 get_wd14_tags（wd-swinv2-tagger-v3，onnxruntime，即 waifuc
+TaggingAction 底层引擎，general/character 阈值 + rating 剔除）。
 
+命名：10.png → 10.txt（去图片后缀）。
 幂等：txt 已存在且非空即跳过（rerun --from 2 只补缺）。单图失败不中断整批，状态记 status.json。
 """
 import base64
@@ -30,7 +32,15 @@ results = {e["rel"]: {"natural": "pending", "tags": "pending"} for e in index}
 
 
 def rel_txt(style: str, rel: str) -> Path:
-    return dataset / style / (rel + ".txt")
+    return dataset / style / (os.path.splitext(rel)[0] + ".txt")
+
+
+def ensure_img(style: str, rel: str) -> None:
+    """保证风格目录里有原图（rerun 跳过 01 步或换风格重跑时补拷贝）。"""
+    dst = dataset / style / rel
+    if not dst.is_file():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes((input_root / rel).read_bytes())
 
 
 def exists(style: str, rel: str) -> bool:
@@ -121,6 +131,8 @@ if do_natural:
         pending = [e for e in index if not exists("natural", e["rel"])]
         print(f"[02] natural 待标 {len(pending)}/{len(index)} 张")
         if pending:
+            for e in pending:
+                ensure_img("natural", e["rel"])
             caption = VisionCaptionAction(client, model, natural_lang)
             with ThreadPoolExecutor(max_workers=4) as ex:
                 futs = {
@@ -146,6 +158,7 @@ if do_tags:
     print(f"[02] tags 待标 {len(pending)}/{len(index)} 张")
     for e in pending:
         try:
+            ensure_img("tags", e["rel"])
             img = Image.open(input_root / e["rel"]).convert("RGB")
             _, general, character = get_wd14_tags(
                 img,
