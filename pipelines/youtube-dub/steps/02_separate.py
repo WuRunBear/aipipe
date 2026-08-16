@@ -36,11 +36,13 @@ os.environ["TMPDIR"] = "/work"
 out_dir = work / "separated"
 out_dir.mkdir(parents=True, exist_ok=True)
 
-# 模型走镜像预烘的 HF 缓存（HF_HOME=/opt/hf + HF_HUB_OFFLINE=1），不传 --repo
+# 模型走镜像预烘的 HF 缓存（HF_HOME=/opt/hf + HF_HUB_OFFLINE=1），不传 --repo；
+# -j 1：单 worker 防多进程内存乘数（容器 cgroup 限额下易 OOM）
 cmd = [
     "python", "-m", "demucs",
     "--two-stems", "vocals",
     "-n", "htdemucs",
+    "-j", "1",
     "-o", str(out_dir),
     str(audio),
 ]

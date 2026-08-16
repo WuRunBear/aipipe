@@ -170,6 +170,8 @@ async def docker_run(
     proxy: str | None = None,
     gpu: bool = False,
     mounts: list[tuple[Path, str]] | None = None,
+    memory: str | None = None,
+    cpus: str | None = None,
 ) -> int:
     """执行一次受控 docker run，输出流式写日志文件，返回退出码。
 
@@ -203,8 +205,8 @@ async def docker_run(
     base_cmd = [
         "docker", "run", "--rm",
         "--name", container_name,
-        "--cpus", str(DEFAULT_CPUS),
-        "--memory", DEFAULT_MEMORY,
+        "--cpus", cpus or str(DEFAULT_CPUS),
+        "--memory", memory or DEFAULT_MEMORY,
         "--stop-timeout", "10",
         "--user", RUN_USER,
         "--read-only",
@@ -382,6 +384,9 @@ async def run_pipeline(
     steps: list[str] = manifest["steps"]
     pipeline_dir = Path(pipeline.source_dir)
     timeout = int(manifest.get("timeout", DEFAULT_TIMEOUT))
+    resources = manifest.get("resources") or {}
+    res_memory = resources.get("memory") or None
+    res_cpus = str(resources.get("cpus") or "") or None
     # 运行时实时解析镜像：改了 Dockerfile/assets 不 refresh 也用对 tag，且不受
     # DB 中过期 image 字段影响（那字段仅供 Web 展示）。
     image = resolve_image(pipeline_dir, manifest)
@@ -460,6 +465,8 @@ async def run_pipeline(
                     proxy=manifest.get("proxy") or RUNTIME_PROXY or None,
                     gpu=bool(manifest.get("gpu")),
                     mounts=path_mounts,
+                    memory=res_memory,
+                    cpus=res_cpus,
                 )
             except Exception as e:  # noqa: BLE001  docker 启动等致命错误
                 log.exception("run %s 步骤 %s 执行异常", run_id, step_file)

@@ -4,6 +4,8 @@ env: [OPENAI_API_KEY, OPENAI_BASE_URL, TRANSLATE_MODEL, TTS_BASE_URL, TTS_API_KE
 # 运行期代理不在此声明，由部署机全局 AIPIPE_RUNTIME_PROXY 提供（下载 YouTube 需要）
 timeout: 3600
 gpu: true                       # 需要 --gpus all 透传宿主 GPU（demucs 在 GPU 上速度差 10×+）
+resources:                      # 覆盖执行器默认 4g 内存：demucs 分离长视频内存峰值高，默认 4g 会 OOM(exit -9)
+  memory: 8g
 params:
   video_url:     {type: string, required: true}
   target_lang:   {type: string, default: "zh"}
