@@ -8,6 +8,7 @@ params:
   tags:             {type: boolean, default: false, hint: danbooru tags（本地 wd-swinv2-tagger-v3）}
   trigger_word:     {type: string, default: "",     hint: 触发词，非空时作为标注前缀（如 sks）}
   natural_lang:     {type: string, default: "en",   hint: 自然语言标注语言 en/zh"}
+  natural_prompt:   {type: text, default: "",       hint: 附加标注要求，如：避免使用某些词汇、尽量使用某些词汇}
   vision_model:     {type: string, default: "google/gemma-4-26b-a4b-it", hint: 视觉模型（OpenRouter 模型名）}
   tag_threshold:    {type: number, default: 0.35,   hint: general tags 置信度阈值}
   character_threshold: {type: number, default: 0.85, hint: 角色 tag 置信度阈值}

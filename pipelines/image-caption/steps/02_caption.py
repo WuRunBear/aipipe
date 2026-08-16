@@ -25,6 +25,7 @@ do_natural = os.environ.get("PIPE_PARAM_NATURAL", "false").strip().lower() in ("
 do_tags = os.environ.get("PIPE_PARAM_TAGS", "false").strip().lower() in ("1", "true", "yes")
 trigger_word = os.environ.get("PIPE_PARAM_TRIGGER_WORD", "").strip()
 natural_lang = os.environ.get("PIPE_PARAM_NATURAL_LANG", "en").strip()
+natural_prompt = os.environ.get("PIPE_PARAM_NATURAL_PROMPT", "").strip()
 tag_threshold = float(os.environ.get("PIPE_PARAM_TAG_THRESHOLD", "0.35"))
 character_threshold = float(os.environ.get("PIPE_PARAM_CHARACTER_THRESHOLD", "0.85"))
 
@@ -64,7 +65,8 @@ def write_txt(style: str, rel: str, text: str) -> None:
 
 # ---------------- natural：OpenRouter 视觉模型 ----------------
 if do_natural:
-    print(f"[02] natural 打标（lang={natural_lang}，触发词={trigger_word or '(无)'}）")
+    print(f"[02] natural 打标（lang={natural_lang}，触发词={trigger_word or '(无)'}，"
+          f"附加要求={natural_prompt or '(无)'}）")
     if not os.environ.get("OPENAI_API_KEY"):
         print("[02] 缺少 OPENAI_API_KEY，natural 全部记 failed")
         for e in index:
@@ -89,6 +91,8 @@ if do_natural:
             "你是 LoRA 训练数据标注员。只看图、不聊天，输出一句对图像主体、"
             "外观、风格、构图与背景的准确描述，只输出描述本身，不加引号与前后缀。"
         )
+        if natural_prompt:
+            SYSTEM += f"\n附加要求：{natural_prompt}"
 
         # 拒绝回答识别：中英文关键词，命中即视为失败（走与接口错误相同的重试）。
         REFUSAL_PATTERNS = (
