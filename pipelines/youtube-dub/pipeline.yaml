@@ -7,6 +7,7 @@ gpu: true                       # 需要 --gpus all 透传宿主 GPU（demucs �
 params:
   video_url:     {type: string, required: true}
   target_lang:   {type: string, default: "zh"}
+  sub_langs:     {type: string, default: "en", hint: 下载的字幕语言（逗号分隔，如 en,zh-Hans）}
   burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
   dub_volume:    {type: number, default: 1.0, hint: 配音音量（amix 前的 volume 滤镜）}
   bgm_volume:    {type: number, default: 0.6, hint: 背景音音量}
