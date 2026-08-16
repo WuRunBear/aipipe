@@ -23,7 +23,11 @@ if not cues_t:
 
 target_lang = os.environ.get("PIPE_PARAM_TARGET_LANG", "zh")
 
-base_url = os.environ.get("TTS_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+base_url = (
+    os.environ.get("PIPE_PARAM_TTS_BASE_URL")
+    or os.environ.get("TTS_BASE_URL")
+    or os.environ.get("OPENAI_BASE_URL")
+)
 if not base_url:
     raise SystemExit("未配置 TTS_BASE_URL（或 OPENAI_BASE_URL）")
 api_key = (
@@ -34,7 +38,11 @@ api_key = (
 client = OpenAI(api_key=api_key, base_url=base_url)
 model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL", "tts-1")
 VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
-voice = os.environ.get("TTS_VOICE") or VOICES.get(target_lang, "alloy")
+voice = (
+    os.environ.get("PIPE_PARAM_TTS_VOICE")
+    or os.environ.get("TTS_VOICE")
+    or VOICES.get(target_lang, "alloy")
+)
 
 
 def ffprobe_duration_ms(path: Path) -> int:
