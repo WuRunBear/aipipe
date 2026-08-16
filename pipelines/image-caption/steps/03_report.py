@@ -32,6 +32,11 @@ for style, enabled in (("natural", do_natural), ("tags", do_tags)):
     for rel in missing:
         lines.append(f"  缺: {rel}")
 
+failed_dir = work / "dataset" / "failed"
+if failed_dir.is_dir():
+    n_failed = sum(1 for p in failed_dir.rglob("*") if p.is_file())
+    lines.append(f"失败图片: {n_failed} 张 → dataset/failed/（rerun --from 2 补标）")
+
 report = "\n".join(lines)
 (work / "report.txt").write_text(report + "\n", encoding="utf-8")
 print(f"[03]\n{report}")

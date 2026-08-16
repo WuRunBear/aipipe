@@ -1,11 +1,12 @@
 """步骤 2/3：按开关打标 → /work/dataset/{natural,tags}/<stem>.txt。
 
 每个风格一个目录，图片与标注 txt 同目录（如 dataset/tags/10.png + dataset/tags/10.txt），
-目录自包含可直接喂训练工具。natural 走 OpenRouter 视觉模型（ThreadPool 并发 + 重试退避）；
+目录自包含可直接喂训练工具。natural 走 OpenRouter 视觉模型（ThreadPool 并发 + 重试退避；
+空返回/拒绝回答与接口错误同等对待，重试耗尽标记 failed，不写 txt）；
 tags 走 dghs-imgutils 的 get_wd14_tags（wd-swinv2-tagger-v3，onnxruntime，即 waifuc
 TaggingAction 底层引擎，general/character 阈值 + rating 剔除）。
 
-命名：10.png → 10.txt（去图片后缀）。
+命名：10.png → 10.txt（去图片后缀）。失败的图片从风格目录移入 dataset/failed/。
 幂等：txt 已存在且非空即跳过（rerun --from 2 只补缺）。单图失败不中断整批，状态记 status.json。
 """
 import base64
@@ -89,6 +90,23 @@ if do_natural:
             "外观、风格、构图与背景的准确描述，只输出描述本身，不加引号与前后缀。"
         )
 
+        # 拒绝回答识别：中英文关键词，命中即视为失败（走与接口错误相同的重试）。
+        REFUSAL_PATTERNS = (
+            "i'm sorry", "i am sorry", "i apologize", "apologize",
+            "i cannot", "i can't", "i am unable", "i'm unable", "unable to",
+            "i won't", "i will not", "as an ai", "i'm an ai", "i am an ai",
+            "cannot assist", "cannot help", "can't help", "cannot comply",
+            "not able to", "i don't", "i do not", "content policy",
+            "抱歉", "对不起", "很抱歉",
+            "我无法", "我不能", "无法提供", "无法回答", "无法描述", "不能描述",
+            "不能提供", "无法完成", "不予", "拒绝", "不适当", "不合适",
+            "违规", "不能回答",
+        )
+
+        def _is_refusal(text: str) -> bool:
+            low = text.lower()
+            return any(p in low for p in REFUSAL_PATTERNS)
+
         class VisionCaptionAction:
             """调用视觉模型为单图生成描述（相当于 waifuc 的 ProcessAction）。"""
 
@@ -119,6 +137,8 @@ if do_natural:
                         text = (resp.choices[0].message.content or "").strip()
                         if not text:
                             raise ValueError("标注为空")
+                        if _is_refusal(text):
+                            raise ValueError(f"模型拒绝回答: {text[:60]!r}")
                         return rel, text
                     except Exception as e:  # noqa: BLE001
                         last = e
@@ -174,6 +194,24 @@ if do_tags:
         except Exception as ex:  # noqa: BLE001
             print(f"[02] tags 失败 {e['rel']}: {ex}")
             results[e["rel"]]["tags"] = "failed"
+
+# ---------------- 收尾：失败图片移出风格目录 → dataset/failed/ ----------------
+failed_dir = work / "dataset" / "failed"
+moved = 0
+for style, enabled in (("natural", do_natural), ("tags", do_tags)):
+    if not enabled:
+        continue
+    for e in index:
+        rel = e["rel"]
+        img = dataset / style / rel
+        if img.is_file() and not exists(style, rel):
+            dest = failed_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(img, dest)
+            moved += 1
+            print(f"[02] 失败图片移入 failed/: {rel}（{style}）")
+if moved:
+    print(f"[02] 共 {moved} 张失败图片 → dataset/failed/")
 
 (work / "status.json").write_text(
     json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
