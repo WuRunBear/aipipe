@@ -19,6 +19,10 @@ r = subprocess.run(
         "--sub-format", "vtt",
         "--sub-langs", "en,zh-Hans,zh-Hant,ja,ko,es,fr,de,ru,pt,ar,hi,id,th,vi",
         "--write-info-json",
+        "--retries", "5",          # 429/网络错误重试 5 次
+        "--retry-sleep", "3",
+        "--sleep-subtitles", "2",  # 每字幕下载前限速，规避 YouTube 字幕限流
+        "--ignore-errors",         # 单条字幕失败不致命；视频失败由下方 mp4 存在性把关
         "-o", "/work/video.%(ext)s",
         "--no-playlist",
         url,
@@ -27,8 +31,9 @@ r = subprocess.run(
     text=True,
 )
 print(r.stdout[-2000:])
-if r.returncode != 0:
+if r.stderr:
     print(r.stderr[-2000:])
+if r.returncode != 0:
     raise SystemExit(f"下载失败（exit {r.returncode}）")
 
 # 排除字幕(.vtt)与元数据(.info.json)，优先 mp4（--merge-output-format 保证合并产物）
