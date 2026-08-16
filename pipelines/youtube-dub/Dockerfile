@@ -4,12 +4,6 @@
 # `--user 1000:1000 --read-only --tmpfs /tmp` 下跑不通。
 FROM pytorch/pytorch:2.4.1-cuda12.1-cudnn9-runtime
 
-# USTC apt 源（本环境 deb.debian.org 限速严重）
-RUN sed -i \
-    -e "s|http://deb.debian.org/debian-security|http://mirrors.ustc.edu.cn/debian-security|g" \
-    -e "s|http://deb.debian.org/debian|http://mirrors.ustc.edu.cn/debian|g" \
-    /etc/apt/sources.list.d/debian.sources
-
 # ffmpeg：音视频混流；fonts-noto-cjk：烧录中文字幕字体；libsndfile1：torchaudio 读写 wav
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk libsndfile1 \
