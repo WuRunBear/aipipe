@@ -26,3 +26,8 @@ DEFAULT_TIMEOUT = int(os.environ.get("AIPIPE_DEFAULT_TIMEOUT", "600"))
 
 # docker 镜像命名前缀
 IMAGE_PREFIX = "aipipe"
+
+# build 期代理（可选）：AIPIPE_BUILD_PROXY=http://127.0.0.1:7890
+# 执行器构建镜像时透传为 build-arg（HTTP_PROXY/HTTPS_PROXY/ALL_PROXY）；
+# 回环地址自动使用 --network host（默认桥网络到不了宿主回环代理）。
+BUILD_PROXY = os.environ.get("AIPIPE_BUILD_PROXY", "").strip()

@@ -2,7 +2,6 @@ name: image-caption
 description: 批量给图片生成 Lora 训练标注（自然语言 / danbooru tags）
 env: [OPENAI_API_KEY, OPENAI_BASE_URL]
 timeout: 7200
-build_network: host   # build 期走宿主机网络/代理下载 tagger 模型烤进镜像（运行期离线）
 params:
   input_dir:        {type: path, required: true, mount: /input/images, hint: 图片文件夹（只读挂载）}
   natural:          {type: boolean, default: true,  hint: 自然语言描述（OpenRouter 视觉模型）}

@@ -12,6 +12,7 @@
 | `AIPIPE_SECRETS_ENV` | `data/secrets/restricted.env` | 受限 Key 文件 |
 | `AIPIPE_DB_URL` | `sqlite:///data/aipipe.db` | 数据库 |
 | `AIPIPE_DEFAULT_CPUS/MEMORY/TIMEOUT` | 2 / 4g / 600 | 默认资源限额 |
+| `AIPIPE_BUILD_PROXY` | 空 | 构建流水线镜像时的代理（如 `http://127.0.0.1:7890`），透传为 build-arg `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`；回环地址自动 `--network host`。空 = 直连 |
 
 ## 首次部署
 
@@ -35,6 +36,11 @@ AIPIPE_JWT_SECRET=<固定随机串> python3 -m uvicorn server.main:app --host 12
 
 # 6. 首次访问 / 会进入"设置密码"页面；随后所有操作需登录
 ```
+
+> **构建期代理**：流水线镜像若需在 build 期访问被墙站点（如 image-caption 下载 HF 模型），
+> 按需给服务进程加 `AIPIPE_BUILD_PROXY=http://127.0.0.1:7890`（回环地址自动走 host 网络；
+> 远程代理地址走默认桥接；能直连的服务器无需设置）。流水线 Dockerfile 通过标准
+> `ARG HTTP_PROXY/HTTPS_PROXY/ALL_PROXY` 接收，仓库内不写死任何代理地址。
 
 ## HTTPS 反代（Caddy 示例）
 

@@ -8,12 +8,14 @@ import asyncio
 import json
 import logging
 import shutil
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 import yaml
 
 from .config import (
+    BUILD_PROXY,
     DATA_DIR,
     DEFAULT_CPUS,
     DEFAULT_MEMORY,
@@ -254,6 +256,14 @@ def install_cmd(step_file: str) -> list[str]:
     return ["python", f"/pipeline/steps/{step_file}"]
 
 
+def _proxy_network(proxy: str) -> str | None:
+    """回环代理（127.0.0.1/localhost/::1）需 host 网络才能从 build 容器访问宿主机。"""
+    if not proxy:
+        return None
+    host = urllib.parse.urlparse(proxy).hostname or ""
+    return "host" if host in ("127.0.0.1", "localhost", "::1") else None
+
+
 async def _image_exists(image: str) -> bool:
     proc = await asyncio.create_subprocess_exec(
         "docker", "image", "inspect", image,
@@ -305,8 +315,9 @@ async def ensure_image(image: str, pipeline_dir: Path, build_network: str | None
 
     按 tag 加锁避免并发 run 同时构建；双检已存在则跳过；构建成功后清理同
     流水线旧 tag。
-    build_network: 清单 build_network 字段（如 "host"），构建时附加
-    `--network <x>`；用于 build 期访问宿主机代理等（默认桥网络到不了宿主 127.0.0.1）。
+    build_network: 清单 build_network 字段（如 "host"）；未声明时若
+    AIPIPE_BUILD_PROXY 为回环地址则自动用 host 网络（默认桥网络到不了宿主回环代理）。
+    代理：AIPIPE_BUILD_PROXY 有值时透传为 build-arg HTTP_PROXY/HTTPS_PROXY/ALL_PROXY。
     """
     # 快速路径：已存在直接返回（不加锁）
     if await _image_exists(image):
@@ -319,8 +330,15 @@ async def ensure_image(image: str, pipeline_dir: Path, build_network: str | None
             return  # 别的并发任务已建好
         log.info("构建镜像 %s ...", image)
         build_cmd = ["docker", "build", "-t", image]
-        if build_network:
-            build_cmd += ["--network", build_network]
+        net = build_network or _proxy_network(BUILD_PROXY)
+        if net:
+            build_cmd += ["--network", net]
+        if BUILD_PROXY:
+            build_cmd += [
+                "--build-arg", f"HTTP_PROXY={BUILD_PROXY}",
+                "--build-arg", f"HTTPS_PROXY={BUILD_PROXY}",
+                "--build-arg", f"ALL_PROXY={BUILD_PROXY}",
+            ]
         build_cmd.append(str(pipeline_dir))
         build = await asyncio.create_subprocess_exec(
             *build_cmd,
