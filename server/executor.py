@@ -208,7 +208,7 @@ async def docker_run(
         "--stop-timeout", "10",
         "--user", RUN_USER,
         "--read-only",
-        "--tmpfs", "/tmp:rw,size=256m,exec",
+        "--tmpfs", "/tmp:rw,size=1g,exec",
         "-v", f"{pipeline_dir}:/pipeline:ro",
         "-v", f"{workdir}:/work", "-w", "/work",
     ]
