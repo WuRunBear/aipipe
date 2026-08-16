@@ -20,6 +20,7 @@ from .config import (
     DEFAULT_CPUS,
     DEFAULT_MEMORY,
     DEFAULT_TIMEOUT,
+    RUNTIME_PROXY,
     SECRETS_ENV,
     SECRETS_ENV_TEMPLATE,
 )
@@ -172,9 +173,9 @@ async def docker_run(
 ) -> int:
     """执行一次受控 docker run，输出流式写日志文件，返回退出码。
 
-    proxy: pipeline.yaml 可声明，仅对该流水线的容器注入代理环境变量并
-    使用 host 网络（不改系统环境，不影响其他流水线）。host 网络使容器
-    可直接访问宿主机的 127.0.0.1:7890 代理。
+    proxy: 流水线清单 proxy 字段（或全局 AIPIPE_RUNTIME_PROXY，清单优先）。
+    仅对该流水线的容器注入代理环境变量并使用 host 网络（不改系统环境，
+    不影响其他流水线）。host 网络使容器可直接访问宿主机的 127.0.0.1:7890 代理。
     gpu: pipeline.yaml 声明 gpu: true 时透传 --gpus all；需宿主装好
     nvidia-container-toolkit，否则 docker run 立即报错。
 
@@ -456,7 +457,7 @@ async def run_pipeline(
                     secrets=secrets,
                     timeout=timeout,
                     log_path=log_path,
-                    proxy=manifest.get("proxy"),
+                    proxy=manifest.get("proxy") or RUNTIME_PROXY or None,
                     gpu=bool(manifest.get("gpu")),
                     mounts=path_mounts,
                 )

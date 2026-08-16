@@ -31,3 +31,8 @@ IMAGE_PREFIX = "aipipe"
 # 执行器构建镜像时透传为 build-arg（HTTP_PROXY/HTTPS_PROXY/ALL_PROXY）；
 # 回环地址自动使用 --network host（默认桥网络到不了宿主回环代理）。
 BUILD_PROXY = os.environ.get("AIPIPE_BUILD_PROXY", "").strip()
+
+# 运行期默认代理（可选）：AIPIPE_RUNTIME_PROXY=http://127.0.0.1:7890
+# 执行器对流水线容器注入代理环境变量并改用 host 网络；流水线清单若声明了
+# proxy: 字段则以清单为准（优先级更高），否则用本全局默认。
+RUNTIME_PROXY = os.environ.get("AIPIPE_RUNTIME_PROXY", "").strip()
