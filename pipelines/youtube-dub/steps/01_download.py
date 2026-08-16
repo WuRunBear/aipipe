@@ -1,5 +1,6 @@
 """步骤 1/5：yt-dlp 下载视频到 /work/video.*，记录源文件名。"""
 import glob
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -40,15 +41,40 @@ if r.stderr:
 if r.returncode != 0:
     raise SystemExit(f"下载失败（exit {r.returncode}）")
 
-# 排除字幕(.vtt)与元数据(.info.json)，优先 mp4（--merge-output-format 保证合并产物）
-videos = [p for p in glob.glob("/work/video.*") if p.endswith(".mp4")]
-if not videos:
-    videos = [
-        p for p in glob.glob("/work/video.*")
-        if not p.endswith(".vtt") and not p.endswith(".info.json")
+# 合并失败的残留格式文件（video.fNNN.mp4 等）也可能匹配 *.mp4，须以音轨为准：
+# 优先合并产物 video.mp4，其次挑带音轨的文件；无音轨则明确报错（多半是音频流
+# 被限流丢弃/合并失败，--ignore-errors 不拦）。
+def ffprobe_streams(path: Path) -> list:
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)],
+        capture_output=True, text=True,
+    )
+    try:
+        return json.loads(r.stdout).get("streams", [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def has_audio(path: Path) -> bool:
+    return any(s.get("codec_type") == "audio" for s in ffprobe_streams(path))
+
+
+candidates = [Path(p) for p in glob.glob("/work/video*.mp4") if Path(p).is_file()]
+if not candidates:
+    candidates = [
+        Path(p) for p in glob.glob("/work/video.*")
+        if Path(p).is_file() and not Path(p).name.endswith((".vtt", ".info.json"))
     ]
-if not videos:
+if not candidates:
     raise SystemExit("未找到下载产物 video.*")
-src = Path(videos[0])
+
+merged = [p for p in candidates if p.name == "video.mp4"]
+src = next((p for p in (merged or candidates) if has_audio(p)), None)
+if src is None:
+    for p in candidates:
+        print(f"[01] {p.name} streams:", [(s.get("codec_type")) for s in ffprobe_streams(p)])
+    raise SystemExit("下载产物无音轨（音频流下载/合并失败，可能被限流，换代理节点后重跑）")
+
 (work / "source.txt").write_text(src.name, encoding="utf-8")
-print(f"[01] done: {src.name} ({src.stat().st_size} bytes)")
+streams = [s.get("codec_type") for s in ffprobe_streams(src)]
+print(f"[01] done: {src.name} ({src.stat().st_size} bytes, streams={streams})")
