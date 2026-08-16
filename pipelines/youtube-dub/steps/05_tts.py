@@ -36,7 +36,9 @@ api_key = (
     or "local"
 )
 client = OpenAI(api_key=api_key, base_url=base_url)
-model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL", "tts-1")
+model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL")
+if not model:
+    raise SystemExit("未配置 tts_model 参数（或 env TTS_MODEL）")
 VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
 voice = (
     os.environ.get("PIPE_PARAM_TTS_VOICE")
