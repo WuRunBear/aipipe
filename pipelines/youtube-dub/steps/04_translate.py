@@ -32,7 +32,8 @@ SYSTEM = "你是专业字幕翻译。只输出译文本身，不要解释、不�
 
 def chat(system: str, prompt: str) -> str:
     resp = client.chat.completions.create(
-        model=os.environ.get("TRANSLATE_MODEL", "deepseek-chat"),
+        model=os.environ.get("PIPE_PARAM_TRANSLATE_MODEL")
+        or os.environ.get("TRANSLATE_MODEL", "deepseek/deepseek-chat"),
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},

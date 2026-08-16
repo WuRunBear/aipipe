@@ -1,6 +1,6 @@
 name: youtube-dub
 description: 下载→人声分离→字幕→翻译→TTS 对齐→混音
-env: [OPENAI_API_KEY, OPENAI_BASE_URL, TRANSLATE_MODEL, TTS_BASE_URL, TTS_API_KEY, TTS_MODEL, TTS_VOICE]
+env: [OPENAI_API_KEY, OPENAI_BASE_URL, TTS_BASE_URL, TTS_API_KEY, TTS_VOICE]
 # 运行期代理不在此声明，由部署机全局 AIPIPE_RUNTIME_PROXY 提供（下载 YouTube 需要）
 timeout: 3600
 gpu: true                       # 需要 --gpus all 透传宿主 GPU（demucs 在 GPU 上速度差 10×+）
@@ -10,6 +10,8 @@ params:
   video_url:     {type: string, required: true}
   target_lang:   {type: string, default: "zh"}
   sub_langs:     {type: string, default: "en", hint: 下载的字幕语言（逗号分隔，如 en,zh-Hans）}
+  translate_model: {type: string, default: "deepseek/deepseek-chat", hint: 翻译模型完整 ID（网关要求全名，如 deepseek/deepseek-chat）}
+  tts_model:     {type: string, default: "tts-1", hint: TTS 模型名}
   burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
   dub_volume:    {type: number, default: 1.0, hint: 配音音量（amix 前的 volume 滤镜）}
   bgm_volume:    {type: number, default: 0.6, hint: 背景音音量}

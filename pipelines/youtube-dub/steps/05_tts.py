@@ -32,7 +32,7 @@ api_key = (
     or "local"
 )
 client = OpenAI(api_key=api_key, base_url=base_url)
-model = os.environ.get("TTS_MODEL", "tts-1")
+model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL", "tts-1")
 VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
 voice = os.environ.get("TTS_VOICE") or VOICES.get(target_lang, "alloy")
 
