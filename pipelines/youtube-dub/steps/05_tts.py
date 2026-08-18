@@ -39,6 +39,7 @@ client = OpenAI(api_key=api_key, base_url=base_url)
 model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL")
 if not model:
     raise SystemExit("未配置 tts_model 参数（或 env TTS_MODEL）")
+fmt = os.environ.get("PIPE_PARAM_TTS_FORMAT") or os.environ.get("TTS_FORMAT") or "wav"
 VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
 voice = (
     os.environ.get("PIPE_PARAM_TTS_VOICE")
@@ -78,7 +79,7 @@ def synth_one(text: str, out: Path, retries: int = 3) -> None:
     for attempt in range(1, retries + 1):
         try:
             resp = client.audio.speech.create(
-                model=model, voice=voice, input=text, response_format="mp3",
+                model=model, voice=voice, input=text, response_format=fmt,
             )
             resp.stream_to_file(str(out))
             if out.stat().st_size > 0:
@@ -128,10 +129,12 @@ def normalize_to_slot(in_path: Path, slot_ms: int) -> Path:
 
 
 video_ms = video_duration_ms()
-print(f"[05] {len(cues_t)} cue, model={model}, voice={voice}, video_ms={video_ms}")
+print(f"[05] {len(cues_t)} cue, model={model}, voice={voice}, fmt={fmt}, video_ms={video_ms}")
 
 # per-cue TTS：并发 8
-tts_files: list[Path] = [work / f"tts_{i:03d}.mp3" for i in range(len(cues_t))]
+tts_dir = work / "tts"
+tts_dir.mkdir(exist_ok=True)
+tts_files: list[Path] = [tts_dir / f"tts_{i:03d}.{fmt}" for i in range(len(cues_t))]
 with ThreadPoolExecutor(max_workers=8) as ex:
     list(ex.map(synth_one,
                 [c["translated"] for c in cues_t],
@@ -181,7 +184,8 @@ if prev_end_ms < video_ms:
 # concat 拼接为 dub.mp3
 concat = work / "concat.txt"
 concat.write_text(
-    "".join(f"file '{p.name}'\n" for p in seg_files), encoding="utf-8"
+    "".join(f"file '{p.relative_to(work).as_posix()}'\n" for p in seg_files),
+    encoding="utf-8",
 )
 subprocess.run(
     ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),

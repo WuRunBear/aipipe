@@ -26,3 +26,6 @@ secrets/
 # 系统
 .DS_Store
 *.log
+
+# AI 会话工作目录（OhMyOpenCode）
+.omo/
