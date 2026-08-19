@@ -1,20 +1,25 @@
 """步骤 5/6：per-cue TTS + 槽位归一化 → /work/dub.mp3。
 
-每条 cue 单独 TTS（可并发），用 ffprobe 测段时长；按槽位
-[cue[i].start_ms, cue[i+1].start_ms) 归一化：
+每条 cue 单独 TTS（可并发），以原声 vocals 同段音频为参考：
+arktts 零样本克隆，reference_audio_base64 取自 02 demucs 分离出的
+vocals.wav 按 cue 时段切片，reference_text 为该段原文字幕——
+配音音色跟随原片说话人。
+
+用 ffprobe 测段时长；按槽位 [cue[i].start_ms, cue[i+1].start_ms) 归一化：
 - 段长 < 槽位：后补静音到槽位末（保留原片节奏）
 - 段长 > 槽位：atempo 加速到恰好填满槽位（链式突破单次 2.0 上限）
 
 每段输出定长为槽位时长 → 直接 concat，dub.mp3 与视频等长且对齐 cue 时间。
 """
+import base64
 import json
 import os
+import re
 import subprocess
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
-from openai import OpenAI
 
 work = Path("/work")
 cues_t = json.loads((work / "cues_translated.json").read_text(encoding="utf-8"))
@@ -35,17 +40,39 @@ api_key = (
     or os.environ.get("OPENAI_API_KEY")
     or "local"
 )
-client = OpenAI(api_key=api_key, base_url=base_url)
-model = os.environ.get("PIPE_PARAM_TTS_MODEL") or os.environ.get("TTS_MODEL")
-if not model:
-    raise SystemExit("未配置 tts_model 参数（或 env TTS_MODEL）")
-fmt = os.environ.get("PIPE_PARAM_TTS_FORMAT") or os.environ.get("TTS_FORMAT") or "wav"
-VOICES = {"zh": "zh-CN-XiaoxiaoNeural", "en": "en-US-AriaNeural"}
-voice = (
-    os.environ.get("PIPE_PARAM_TTS_VOICE")
-    or os.environ.get("TTS_VOICE")
-    or VOICES.get(target_lang, "alloy")
+model = (
+    os.environ.get("PIPE_PARAM_TTS_MODEL")
+    or os.environ.get("TTS_MODEL")
+    or "arktts"
 )
+fmt = os.environ.get("PIPE_PARAM_TTS_FORMAT") or os.environ.get("TTS_FORMAT") or "wav"
+
+# 参考音频：02 demucs 分离出的原声 vocals，按 cue 时段切片后 base64 传给 arktts
+vocals_paths = list(work.glob("separated/**/vocals.wav"))
+if not vocals_paths:
+    raise SystemExit("未找到原声 vocals.wav（02 分离产物缺失，无法提供参考音频）")
+vocals = vocals_paths[0]
+
+WAV_BYTES_PER_MS = 44100 * 2 // 1000  # mono 16-bit @44.1kHz
+MIN_REF_BYTES = int(300 * WAV_BYTES_PER_MS)  # 参考音频下限 300ms
+
+
+def norm_text(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def cut_reference_ms(start_ms: int, end_ms: int) -> bytes:
+    """切 vocals[start_ms, end_ms) → 44.1kHz 单声道 wav 字节。"""
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-ss", f"{start_ms / 1000:.3f}", "-i", str(vocals),
+         "-t", f"{max(end_ms - start_ms, 0) / 1000:.3f}",
+         "-ar", "44100", "-ac", "1", "-f", "wav", "-"],
+        capture_output=True,
+    )
+    if r.returncode != 0:
+        raise ValueError(r.stderr.decode("utf-8", "replace")[-500:])
+    return r.stdout
 
 
 def ffprobe_duration_ms(path: Path) -> int:
@@ -74,17 +101,30 @@ def ffprobe_audio_fmt(path: Path) -> tuple[int, str]:
     return int(sr_str), "mono" if int(ch_str) == 1 else "stereo"
 
 
-def synth_one(text: str, out: Path, retries: int = 3) -> None:
+def synth_one(text: str, out: Path, ref_b64: str, ref_text: str, retries: int = 3) -> None:
+    """arktts 调用：model + input + reference_audio_base64 + reference_text。"""
+    url = f"{base_url.rstrip('/')}/audio/speech"
+    payload = json.dumps({
+        "model": model,
+        "input": text,
+        "reference_audio_base64": ref_b64,
+        "reference_text": ref_text,
+    }).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if api_key and api_key != "local":
+        headers["Authorization"] = f"Bearer {api_key}"
     last = None
     for attempt in range(1, retries + 1):
         try:
-            resp = client.audio.speech.create(
-                model=model, voice=voice, input=text, response_format=fmt,
-            )
-            resp.stream_to_file(str(out))
-            if out.stat().st_size > 0:
-                return
-            raise ValueError("TTS 输出为空")
+            req = urllib.request.Request(url, data=payload, headers=headers)
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                data = resp.read()
+            if not data:
+                raise ValueError("TTS 输出为空")
+            if data[:1] == b"{":  # wav 以 RIFF 开头，JSON 说明网关报错
+                raise ValueError(f"网关返回错误: {data[:300].decode('utf-8', 'replace')}")
+            out.write_bytes(data)
+            return
         except Exception as e:  # noqa: BLE001
             last = e
             print(f"[05] {out.name} 重试 {attempt}/{retries}: {e}")
@@ -131,7 +171,7 @@ def normalize_to_slot(in_path: Path, slot_ms: int) -> Path:
 
 
 video_ms = video_duration_ms()
-print(f"[05] {len(cues_t)} cue, model={model}, voice={voice}, fmt={fmt}, video_ms={video_ms}")
+print(f"[05] {len(cues_t)} cue, model={model}, fmt={fmt}, video_ms={video_ms}")
 
 MIN_SLOT_MS = 200
 kept: list[tuple[int, dict, int]] = []
@@ -145,6 +185,34 @@ for i, c in enumerate(cues_t):
 if not kept:
     raise SystemExit("无可用 TTS cue（全部槽位过短）")
 
+# 兜底参考：最长 cue 的原声切片（短 cue / 切片失败时退用，保持同一说话人）
+backup_ref: tuple[str, str] | None = None
+try:
+    longest = max(kept, key=lambda kc: kc[1]["end_ms"] - kc[1]["start_ms"])
+    ba = cut_reference_ms(longest[1]["start_ms"], longest[1]["end_ms"])
+    if len(ba) >= MIN_REF_BYTES:
+        backup_ref = (base64.b64encode(ba).decode(), norm_text(longest[1]["text"]))
+    else:
+        print(f"[05] 兜底参考过短（{len(ba)}B < {MIN_REF_BYTES}B），短 cue 无法兜底")
+except Exception as e:  # noqa: BLE001
+    print(f"[05] 兜底参考切片失败: {e}")
+
+# 逐 cue 准备参考音频（base64 + 原文字幕），切片过短/失败则退用兜底
+refs: dict[int, tuple[str, str]] = {}
+for i, c, _ in kept:
+    try:
+        audio = cut_reference_ms(c["start_ms"], c["end_ms"])
+        ok = len(audio) >= MIN_REF_BYTES
+    except Exception as e:  # noqa: BLE001
+        print(f"[05] cue {i} 参考切片失败（{e}），退用兜底")
+        ok = False
+    if ok:
+        refs[i] = (base64.b64encode(audio).decode(), norm_text(c["text"]))
+    elif backup_ref is not None:
+        refs[i] = backup_ref
+    else:
+        raise SystemExit(f"cue {i} 参考音频不可用且无兜底（检查 vocals.wav 时长/切片）")
+
 # per-cue TTS：并发 8
 tts_dir = work / "tts"
 tts_dir.mkdir(exist_ok=True)
@@ -152,7 +220,9 @@ tts_files: dict[int, Path] = {i: tts_dir / f"tts_{i:03d}.{fmt}" for i, _, _ in k
 with ThreadPoolExecutor(max_workers=8) as ex:
     list(ex.map(synth_one,
                 [c["translated"] for _, c, _ in kept],
-                [tts_files[i] for i, _, _ in kept]))
+                [tts_files[i] for i, _, _ in kept],
+                [refs[i][0] for i, _, _ in kept],
+                [refs[i][1] for i, _, _ in kept]))
 
 # 读 TTS 实际采样率/声道，用于生成完全匹配的静音段（避免 concat mismatch）
 sr, ch_layout = ffprobe_audio_fmt(next(iter(tts_files.values())))

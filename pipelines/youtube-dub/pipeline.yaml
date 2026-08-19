@@ -1,6 +1,6 @@
 name: youtube-dub
 description: 下载→人声分离→字幕→翻译→TTS 对齐→混音
-env: [OPENAI_API_KEY, OPENAI_BASE_URL, TTS_BASE_URL, TTS_MODEL, TTS_API_KEY, TTS_VOICE, YOUTUBE_COOKIES_FILE]
+env: [OPENAI_API_KEY, OPENAI_BASE_URL, TTS_BASE_URL, TTS_MODEL, TTS_API_KEY, YOUTUBE_COOKIES_FILE]
 # 运行期代理不在此声明，由部署机全局 AIPIPE_RUNTIME_PROXY 提供（下载 YouTube 需要）
 timeout: 3600
 gpu: true                       # 需要 --gpus all 透传宿主 GPU（demucs 在 GPU 上速度差 10×+）
@@ -11,9 +11,8 @@ params:
   target_lang:   {type: string, default: "zh"}
   sub_langs:     {type: string, default: "en", hint: 下载的字幕语言（逗号分隔，如 en,zh-Hans）}
   translate_model: {type: string, default: "deepseek/deepseek-v3.2", hint: 翻译模型完整 ID（网关要求全名，如 deepseek/deepseek-v3.2）}
-  tts_model:     {type: string, hint: TTS 模型名（留空用 env TTS_MODEL，默认 tts-1）}
+  tts_model:     {type: string, hint: TTS 模型名（留空用 env TTS_MODEL，默认 arktts；参考音频固定取原声 vocals）}
   tts_base_url:  {type: string, hint: TTS 服务地址（留空用 env TTS_BASE_URL/OPENAI_BASE_URL）}
-  tts_voice:     {type: string, hint: TTS 音色（留空用 env TTS_VOICE 或按语言默认）}
   tts_format:    {type: string, default: "wav", hint: TTS 输出格式（取决于 TTS 服务；arktts 只支持 wav/pcm，推荐 wav）}
   burn_subtitles: {type: boolean, default: false, hint: 烧录翻译后字幕到画面}
   dub_volume:    {type: number, default: 1.0, hint: 配音音量（amix 前的 volume 滤镜）}
