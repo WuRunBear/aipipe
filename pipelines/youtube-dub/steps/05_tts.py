@@ -125,28 +125,42 @@ def normalize_to_slot(in_path: Path, slot_ms: int) -> Path:
     if r.returncode != 0:
         print(r.stderr[-1500:])
         raise SystemExit(f"归一化失败: {in_path.name}")
+    if out.stat().st_size < 1000:
+        raise SystemExit(f"归一化输出异常（空/损坏）: {out.name} ({out.stat().st_size}B)")
     return out
 
 
 video_ms = video_duration_ms()
 print(f"[05] {len(cues_t)} cue, model={model}, voice={voice}, fmt={fmt}, video_ms={video_ms}")
 
+MIN_SLOT_MS = 200
+kept: list[tuple[int, dict, int]] = []
+for i, c in enumerate(cues_t):
+    slot_end = cues_t[i + 1]["start_ms"] if i + 1 < len(cues_t) else video_ms
+    slot_ms = max(slot_end - c["start_ms"], 0)
+    if slot_ms < MIN_SLOT_MS:
+        print(f"[05] cue {i} 槽位过短（{slot_ms}ms），跳过")
+        continue
+    kept.append((i, c, slot_ms))
+if not kept:
+    raise SystemExit("无可用 TTS cue（全部槽位过短）")
+
 # per-cue TTS：并发 8
 tts_dir = work / "tts"
 tts_dir.mkdir(exist_ok=True)
-tts_files: list[Path] = [tts_dir / f"tts_{i:03d}.{fmt}" for i in range(len(cues_t))]
+tts_files: dict[int, Path] = {i: tts_dir / f"tts_{i:03d}.{fmt}" for i, _, _ in kept}
 with ThreadPoolExecutor(max_workers=8) as ex:
     list(ex.map(synth_one,
-                [c["translated"] for c in cues_t],
-                tts_files[:]))
+                [c["translated"] for _, c, _ in kept],
+                [tts_files[i] for i, _, _ in kept]))
 
 # 读 TTS 实际采样率/声道，用于生成完全匹配的静音段（避免 concat mismatch）
-sr, ch_layout = ffprobe_audio_fmt(tts_files[0])
+sr, ch_layout = ffprobe_audio_fmt(next(iter(tts_files.values())))
 
 # 逐 segment 归一化 + 收集 concat 列表（含头/段/间的静音）
 seg_files: list[Path] = []
 prev_end_ms = 0
-for i, (c, tts) in enumerate(zip(cues_t, tts_files)):
+for i, c, slot_ms in kept:
     start_ms = c["start_ms"]
     # 头静音或前一句到本句之间的间隙
     if start_ms > prev_end_ms:
@@ -159,14 +173,7 @@ for i, (c, tts) in enumerate(zip(cues_t, tts_files)):
         )
         seg_files.append(gap)
         prev_end_ms = start_ms
-    # 槽位末=下一条 cue.start 或视频时长
-    slot_end = cues_t[i + 1]["start_ms"] if i + 1 < len(cues_t) else video_ms
-    slot_ms = max(slot_end - start_ms, 0)
-    if slot_ms <= 0:
-        print(f"[05] cue {i} 槽位为零/负，跳过")
-        prev_end_ms = max(prev_end_ms, start_ms)
-        continue
-    seg = normalize_to_slot(tts, slot_ms)
+    seg = normalize_to_slot(tts_files[i], slot_ms)
     seg_files.append(seg)
     prev_end_ms = start_ms + slot_ms
 
@@ -193,4 +200,6 @@ subprocess.run(
     check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 )
 final_ms = ffprobe_duration_ms(work / "dub.mp3")
+if abs(final_ms - video_ms) > max(1000, video_ms * 0.01):
+    raise SystemExit(f"dub.mp3 时长校验失败: {final_ms}ms vs 视频 {video_ms}ms")
 print(f"[05] dub.mp3 done: {len(seg_files)} segs, duration={final_ms}ms (video={video_ms}ms)")

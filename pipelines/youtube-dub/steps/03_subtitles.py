@@ -49,6 +49,28 @@ def vtt_to_cues(vtt: str) -> list[dict]:
     return cues
 
 
+def vtt_ts_ms(ts: str) -> int:
+    h, m, s = ts.split(":")
+    return int(round((int(h) * 3600 + int(m) * 60 + float(s)) * 1000))
+
+
+def drop_sliver_cues(cues: list[dict], min_ms: int = 250) -> list[dict]:
+    """剔除 YouTube 自动字幕的 10ms 残片 cue：时长过短且文本被相邻 cue 包含。"""
+    def norm(t: str) -> str:
+        return re.sub(r"\s+", " ", t).strip()
+
+    kept: list[dict] = []
+    for i, c in enumerate(cues):
+        dur = vtt_ts_ms(c["end"]) - vtt_ts_ms(c["start"])
+        t = norm(c["text"])
+        prev_t = norm(cues[i - 1]["text"]) if i > 0 else ""
+        next_t = norm(cues[i + 1]["text"]) if i + 1 < len(cues) else ""
+        if dur < min_ms and t and (t in prev_t or prev_t in t or t in next_t or next_t in t):
+            continue
+        kept.append(c)
+    return kept
+
+
 def lang_of(path: Path) -> str:
     return path.name.rsplit(".", 2)[1]
 
@@ -81,6 +103,6 @@ if chosen is None:
 if chosen is None:
     chosen = Path(vtts[0])
 
-cues = vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace"))
+cues = drop_sliver_cues(vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace")))
 (work / "cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
-print(f"[03] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ cues {len(cues)} 条")
+print(f"[03] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ cues {len(cues)} 条（已剔除残片）")
