@@ -71,6 +71,43 @@ def drop_sliver_cues(cues: list[dict], min_ms: int = 250) -> list[dict]:
     return kept
 
 
+def dedupe_rollup(cues: list[dict]) -> list[dict]:
+    """启发式去除 VTT roll-up 模式引起的相邻重复行（后 cue 首行 == 前 cue 末行）。
+    
+    逐 cue 处理：拆文本为行列表，剔除与上一条保留 cue 末行相同的开头行（while 循环，
+    覆盖两行回滚窗口），若行列表删空则跳过该 cue。
+    
+    已知局限：同一句话被讲两遍且与上一条末行逐字符相同会被误剔——VTT 格式下无法区分，
+    属可接受启发式（实战影响可忽略）。
+    """
+    kept: list[dict] = []
+    prev_last: str | None = None  # 上一条保留 cue 的末行
+    
+    for c in cues:
+        # 拆为行，过滤空行
+        lines = [ln.strip() for ln in c["text"].split("\n") if ln.strip()]
+        
+        # 剔除开头与上一条末行重复的行（while 循环覆盖多行回滚）
+        while lines and lines[0] == prev_last:
+            lines.pop(0)
+        
+        # 若全部行被剔除，跳过此 cue（不保留）
+        if not lines:
+            continue
+        
+        # 保留原时间信息，合并去重后的行
+        kept.append({
+            "start": c["start"],
+            "end": c["end"],
+            "text": "\n".join(lines)
+        })
+        
+        # 更新上一条末行
+        prev_last = lines[-1]
+    
+    return kept
+
+
 def lang_of(path: Path) -> str:
     return path.name.rsplit(".", 2)[1]
 
@@ -103,6 +140,7 @@ if chosen is None:
 if chosen is None:
     chosen = Path(vtts[0])
 
-cues = drop_sliver_cues(vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace")))
+raw = vtt_to_cues(chosen.read_text(encoding="utf-8", errors="replace"))
+cues = drop_sliver_cues(dedupe_rollup(raw))
 (work / "cues.json").write_text(json.dumps(cues, ensure_ascii=False), encoding="utf-8")
-print(f"[03] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ cues {len(cues)} 条（已剔除残片）")
+print(f"[03] 字幕 {chosen.name}（lang={lang_of(chosen)}）→ 原始 {len(raw)} 条 → 去重后 {len(cues)} 条（已剔除残片）")
