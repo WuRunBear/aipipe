@@ -1,6 +1,6 @@
-"""步骤 4/6：per-cue 翻译 → translated.srt + cues_translated.json。
+"""步骤 4/6：窗口化整句感知翻译 → translated.srt + cues_translated.json。
 
-唯一翻译源：每条 cue 的源文翻译一次，不再分"整段 vs 按句"两条路径。
+利用上下文优化跨句边界的翻译连续性（窗口 size=20，上一窗口末2行为上下文参考）。
 配音（05）读 cues_translated.json，烧录（06）读 translated.srt，
 两者使用同一份译文，确保配音与字幕措辞一致。
 
@@ -45,23 +45,50 @@ def chat(system: str, prompt: str) -> str:
     return text
 
 
-def translate_cues(texts: list[str]) -> list[str]:
-    """编号批量翻译，返回与输入等长的译文列表；失败抛异常。"""
-    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
-    prompt = (
-        f"把下面编号的{len(texts)}条字幕逐条翻译成{target_lang}，"
-        f"严格保持编号与条数一致，每条译文单独一行，格式：\"编号. 译文\"。\n\n{numbered}"
+def translate_window(texts: list[str], context_lines: list[str]) -> list[str]:
+    """编号批量翻译，带上下文感知（context_lines 为上一窗口末若干行），返回等长译文列表；失败抛异常。"""
+    prompt_parts = []
+    if context_lines:
+        prompt_parts.append("【参考上下文（属于上一段，不要翻译）】\n" + 
+                           "\n".join(context_lines) + "\n\n")
+    
+    prompt_parts.append(
+        f"把下面编号的{len(texts)}条字幕翻译成{target_lang}。"
+        f"这些是同一段视频的连续字幕片段，相邻编号可能属于同一句话：若同句，先按整句翻译，再把译文按原文片段边界切回同等数量的行，每行对应一个编号。"
+        f"严格保持编号与条数一致，每条译文单独一行，格式：\"编号. 译文\"。"
     )
-    out = chat(SYSTEM, prompt)
-    parsed = {}
-    for line in out.splitlines():
-        m = re.match(r"^(\d+)[.)、]\s*(.*)$", line.strip())
-        if m:
-            parsed[int(m.group(1))] = m.group(2)
-    result = [parsed[i + 1] for i in range(len(texts)) if i + 1 in parsed]
-    if len(result) != len(texts):
-        raise ValueError(f"条数不匹配: 期望 {len(texts)} 实际 {len(result)}")
-    return result
+    
+    prompt_parts.append("")
+    prompt_parts.append("\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts)))
+    
+    prompt = "\n".join(prompt_parts)
+    
+    last_error = None
+    for attempt in range(1, 4):  # 3 attempts total
+        try:
+            out = chat(SYSTEM, prompt)
+            parsed = {}
+            for line in out.splitlines():
+                m = re.match(r"^(\d+)[.)、]\s*(.*)$", line.strip())
+                if m:
+                    parsed[int(m.group(1))] = m.group(2)
+            result = [parsed[i + 1] for i in range(len(texts)) if i + 1 in parsed]
+            if len(result) != len(texts):
+                raise ValueError(f"条数不匹配: 期望 {len(texts)} 实际 {len(result)}")
+            
+            # 检查是否有空译文
+            for idx, t in enumerate(result, start=1):
+                if not t.strip():
+                    raise ValueError(f"第 {idx} 条译文为空")
+            
+            return result
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            print(f"[04] 窗口翻译重试 {attempt}/3: {e}")
+            if attempt < 3:
+                time.sleep(2 * attempt)
+    
+    raise ValueError(f"窗口翻译失败（3次重试后）: {last_error}")
 
 
 def _translate_cue_solo(text: str, max_retries: int = 3) -> str:
@@ -95,16 +122,19 @@ def to_srt_ts(ms: int) -> str:
 
 
 BATCH = 20
-print(f"[04] 按句翻译 {len(cues)} 条 cue（批 {BATCH} 条）")
+print(f"[04] 窗口翻译 {(len(cues) + BATCH - 1) // BATCH} 批（共 {len(cues)} 条 cue，批 {BATCH}）")
 translated_cues: list[str] = []
+prev_context: list[str] = []
 for i in range(0, len(cues), BATCH):
     batch = cues[i:i + BATCH]
     texts = [c["text"].strip().replace("\n", " ") for c in batch]
     try:
-        translated_cues.extend(translate_cues(texts))
-    except Exception as e:  # noqa: BLE001  批量失败退化为逐句
-        print(f"[04] 批量翻译失败（{e}），退化逐句")
-        translated_cues.extend(_translate_cue_solo(t) for t in texts)
+        out = translate_window(texts, prev_context[-2:] if prev_context else [])
+    except Exception as e:  # noqa: BLE001  窗口失败退化为逐句
+        print(f"[04] 窗口翻译失败（{e}），退化逐句")
+        out = [_translate_cue_solo(t) for t in texts]
+    translated_cues.extend(out)
+    prev_context = texts
     if i + BATCH < len(cues):
         time.sleep(0.2)  # 限速，避免触发限流
 
