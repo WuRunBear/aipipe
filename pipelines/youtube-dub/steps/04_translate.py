@@ -29,6 +29,12 @@ client = OpenAI(
 
 SYSTEM = "你是专业字幕翻译。只输出译文本身，不要解释、不要引号、不要前后缀。"
 
+SENT_END = re.compile(r"[。！？!?…]\s*$")
+SENT_PUNCT = re.compile(r"[.。！？!?…]")
+MERGE_MAX_CHARS = 25
+MERGE_MIN_REPORT = 15
+MERGE_MAX_GAP_MS = 1500
+
 
 def chat(system: str, prompt: str) -> str:
     resp = client.chat.completions.create(
@@ -56,6 +62,7 @@ def translate_window(texts: list[str], context_lines: list[str]) -> list[str]:
         f"把下面编号的{len(texts)}条字幕翻译成{target_lang}。"
         f"这些是同一段视频的连续字幕片段，相邻编号可能属于同一句话：若同句，先按整句翻译，再把译文按原文片段边界切回同等数量的行，每行对应一个编号。"
         f"严格保持编号与条数一致，每条译文单独一行，格式：\"编号. 译文\"。"
+        f"同一句话的译文只在最后一个编号行以句末标点结尾（。！？…），中间行不加句末标点。"
     )
     
     prompt_parts.append("")
@@ -121,6 +128,42 @@ def to_srt_ts(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+def merge_lines(entries, max_chars=MERGE_MAX_CHARS, max_gap_ms=MERGE_MAX_GAP_MS):
+    """贪婪单遍合并：不跨句末（SENT_END）、源文含句末标点即断行（绝不跨句）、不跨大间隔、不超过最大字符数"""
+    cur = []
+    merged = []
+    
+    for e in entries:
+        t = e["translated"].strip()
+        
+        if cur and (
+            e["start_ms"] - cur[-1]["end_ms"] > max_gap_ms
+            or SENT_END.search(cur[-1]["translated"].strip())  # 上一条是句末 → 断行（绝不跨句）
+            or SENT_PUNCT.search(cur[-1]["text"])  # 源文含句末标点（含行内）→ 断行防跨句
+            or sum(len(x["translated"].strip()) for x in cur) + len(t) > max_chars
+        ):
+            # flush cur → merged
+            merged.append({
+                "start_ms": cur[0]["start_ms"],
+                "end_ms": cur[-1]["end_ms"],
+                "text": " ".join(x["text"].strip() for x in cur),
+                "translated": "".join(x["translated"].strip() for x in cur)
+            })
+            cur = []
+        
+        cur.append(e)
+    
+    if cur:
+        merged.append({
+            "start_ms": cur[0]["start_ms"],
+            "end_ms": cur[-1]["end_ms"],
+            "text": " ".join(x["text"].strip() for x in cur),
+            "translated": "".join(x["translated"].strip() for x in cur)
+        })
+    
+    return merged
+
+
 BATCH = 20
 print(f"[04] 窗口翻译 {(len(cues) + BATCH - 1) // BATCH} 批（共 {len(cues)} 条 cue，批 {BATCH}）")
 translated_cues: list[str] = []
@@ -139,14 +182,10 @@ for i in range(0, len(cues), BATCH):
         time.sleep(0.2)  # 限速，避免触发限流
 
 # translated.srt：始终生成；06 按 burn_subtitles 决定是否烧录到画面
-srt_lines: list[str] = []
 enriched: list[dict] = []
-for idx, (c, t) in enumerate(zip(cues, translated_cues), start=1):
+for c, t in zip(cues, translated_cues):
     start_ms = ts_to_ms(c["start"])
     end_ms = ts_to_ms(c["end"])
-    srt_lines.append(
-        f"{idx}\n{to_srt_ts(start_ms)} --> {to_srt_ts(end_ms)}\n{t}\n"
-    )
     enriched.append({
         "start_ms": start_ms,
         "end_ms": end_ms,
@@ -154,8 +193,22 @@ for idx, (c, t) in enumerate(zip(cues, translated_cues), start=1):
         "translated": t,
     })
 
+merged = merge_lines(enriched)
+
+srt_lines: list[str] = []
+for idx, m in enumerate(merged, start=1):
+    srt_lines.append(
+        f"{idx}\n{to_srt_ts(m['start_ms'])} --> {to_srt_ts(m['end_ms'])}\n{m['translated']}\n"
+    )
+
 (work / "translated.srt").write_text("\n".join(srt_lines), encoding="utf-8")
 (work / "cues_translated.json").write_text(
-    json.dumps(enriched, ensure_ascii=False), encoding="utf-8"
+    json.dumps(merged, ensure_ascii=False), encoding="utf-8"
 )
-print(f"[04] translated.srt: {len(cues)} 条；cues_translated.json ready")
+
+print(f"[04] 翻译 {len(cues)} 条 → 合并 {len(merged)} 行")
+short_lines = sum(1 for m in merged if len(m["translated"].strip()) < MERGE_MIN_REPORT)
+if short_lines > 0:
+    pct = short_lines / len(merged) * 100
+    print(f"[04] 合并后 <{MERGE_MIN_REPORT} 字短行 {short_lines} 行（{pct:.1f}%）")
+print(f"[04] translated.srt ready: {len(merged)} 行")
