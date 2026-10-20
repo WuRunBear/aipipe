@@ -198,7 +198,16 @@ def cmd_logs(args) -> int:
                                     return 0 if ev["status"] == "success" else 1
         except urllib.error.HTTPError as e:
             raise CliError(f"{e.code} {e.reason}") from e
-    print(request("GET", url))
+    # 该端点返回纯文本（PlainTextResponse），不能用 request() 的 JSON 解析
+    req = urllib.request.Request(base_url() + f"/runs/{args.run_id}/logs")
+    tok = token()
+    if tok:
+        req.add_header("Authorization", f"Bearer {tok}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        raise CliError(f"{e.code} {e.reason}") from e
     return 0
 
 
