@@ -1,0 +1,27 @@
+name: image-search
+description: 按自然语言描述自动搜网图 → LLM 查询扩写 + 多源召回 → 视觉模型判真 → 下载原图
+env: [OPENAI_API_KEY, OPENAI_BASE_URL]
+timeout: 1800
+params:
+  query:        {type: string,  required: true, hint: 图片内容描述，如「一个人和一条狗」}
+  count:        {type: number,  default: 20,  hint: 目标下载张数}
+  candidates:   {type: number,  default: 120, hint: 进入视觉判真的候选上限}
+  pool_cap:     {type: number,  default: 300, hint: 01 步输出的候选池上限}
+  expand:       {type: boolean, default: true, hint: 是否用 LLM 扩写查询（中文变体 + 英文变体）}
+  expand_count: {type: number,  default: 12, hint: 每个方向扩写的变体数}
+  expand_model: {type: string,  default: "deepseek/deepseek-v3.2", hint: 查询扩写用的文本模型（OpenRouter）}
+  sources:      {type: string,  default: "cn_bing,en_bing,baidu,yandex,commons", hint: 搜索源，逗号分隔}
+  site_cap:     {type: number,  default: 3,  hint: 每个站点最多保留几张（防单一图库刷屏）}
+  verify:       {type: boolean, default: true, hint: 是否用视觉模型判真}
+  criteria:     {type: text,    default: "",       hint: 校验判据，留空则用 query}
+  safe:         {type: boolean, default: true, hint: 判真时是否同时排除裸露/色情/血腥}
+  vision_model: {type: string,  default: "google/gemma-4-26b-a4b-it", hint: 终审视觉模型（OpenRouter 模型名）}
+  prefilter_model: {type: string, default: "",    hint: 预筛小模型，留空则跳过两级判定（成本高）}
+  thumb_size:   {type: number,  default: 256, hint: 送视觉模型前的缩略图长边像素（越小越省 token）}
+  min_width:    {type: number,  default: 640, hint: 最小宽度（像素）}
+  min_height:   {type: number,  default: 480, hint: 最小高度（像素）}
+  max_mb:       {type: number,  default: 20,  hint: 单张图片大小上限（MB）}
+steps:
+  - 01_search.py
+  - 02_verify.py
+  - 03_download.py
