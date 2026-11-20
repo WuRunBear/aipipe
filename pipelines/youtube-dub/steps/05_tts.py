@@ -1,15 +1,16 @@
-"""步骤 5/6：per-cue TTS + 槽位归一化 → /work/dub.mp3。
+"""步骤 5/7：per-sentence TTS + 槽位归一化 → /work/dub.mp3。
 
-每条 cue 单独 TTS（可并发），以原声 vocals 同段音频为参考：
-arktts 零样本克隆，reference_audio_base64 取自 02 demucs 分离出的
-vocals.wav 按 cue 时段切片，reference_text 为该段原文字幕——
-配音音色跟随原片说话人。
+04 产出的单位已是完整句子；每句单独 TTS（可并发），以原声 vocals 为参考：
+arktts 零样本克隆，reference_audio_base64 取句内一段连续 cue 片段
+（最长不超过 6s，从该句最长的 cue 向两侧扩展），reference_text 用
+对应片段的原文——保证参考音频是单一时刻、单一说话人，不会把两个人的
+声音混进同一条参考。配音音色跟随原片说话人。
 
-用 ffprobe 测段时长；按槽位 [cue[i].start_ms, cue[i+1].start_ms) 归一化：
+用 ffprobe 测段时长；按槽位 [句[i].start_ms, 句[i+1].start_ms) 归一化：
 - 段长 < 槽位：后补静音到槽位末（保留原片节奏）
 - 段长 > 槽位：atempo 加速到恰好填满槽位（链式突破单次 2.0 上限）
 
-每段输出定长为槽位时长 → 直接 concat，dub.mp3 与视频等长且对齐 cue 时间。
+每段输出定长为槽位时长 → 直接 concat，dub.mp3 与视频等长且对齐句时间。
 """
 import base64
 import json
@@ -24,7 +25,7 @@ from pathlib import Path
 work = Path("/work")
 cues_t = json.loads((work / "cues_translated.json").read_text(encoding="utf-8"))
 if not cues_t:
-    raise SystemExit("无可用译文 cue")
+    raise SystemExit("无可用译文句")
 
 target_lang = os.environ.get("PIPE_PARAM_TARGET_LANG", "zh")
 
@@ -47,7 +48,7 @@ model = (
 )
 fmt = os.environ.get("PIPE_PARAM_TTS_FORMAT") or os.environ.get("TTS_FORMAT") or "wav"
 
-# 参考音频：02 demucs 分离出的原声 vocals，按 cue 时段切片后 base64 传给 arktts
+# 参考音频：02 demucs 分离出的原声 vocals，按句内片段切片后 base64 传给 arktts
 vocals_paths = list(work.glob("separated/**/vocals.wav"))
 if not vocals_paths:
     raise SystemExit("未找到原声 vocals.wav（02 分离产物缺失，无法提供参考音频）")
@@ -55,10 +56,51 @@ vocals = vocals_paths[0]
 
 WAV_BYTES_PER_MS = 44100 * 2 // 1000  # mono 16-bit @44.1kHz
 MIN_REF_BYTES = int(300 * WAV_BYTES_PER_MS)  # 参考音频下限 300ms
+MAX_REF_MS = 6000  # 参考音频上限：过长会掺入停顿/换人
 
 
 def norm_text(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
+
+
+def pick_ref_window(c: dict) -> tuple[int, int, str]:
+    """句内挑参考窗口：最长 cue 为种子，向两侧扩展到 <=6s。
+
+    返回 (start_ms, end_ms, reference_text)。参考音频始终取连续 cue 片段，
+    避免整句跨说话人时把两个声音混进同一段参考。
+    """
+    parts = c.get("parts") or []
+    if not parts:
+        return c["start_ms"], c["end_ms"], norm_text(c["text"])
+
+    seed = max(
+        range(len(parts)),
+        key=lambda i: parts[i]["end_ms"] - parts[i]["start_ms"],
+    )
+    lo = hi = seed
+    dur = parts[seed]["end_ms"] - parts[seed]["start_ms"]
+    while True:
+        cand: list[tuple[int, int]] = []  # (时长, 新下标)
+        if lo > 0:
+            p = parts[lo - 1]
+            cand.append((p["end_ms"] - p["start_ms"], lo - 1))
+        if hi < len(parts) - 1:
+            p = parts[hi + 1]
+            cand.append((p["end_ms"] - p["start_ms"], hi + 1))
+        cand = [x for x in cand if dur + x[0] <= MAX_REF_MS]
+        if not cand:
+            break
+        add, idx = max(cand)
+        dur += add
+        if idx < lo:
+            lo = idx
+        else:
+            hi = idx
+
+    start = parts[lo]["start_ms"]
+    end = parts[hi]["end_ms"]
+    text = norm_text(" ".join(p["text"] for p in parts[lo:hi + 1]))
+    return start, end, text
 
 
 def cut_reference_ms(start_ms: int, end_ms: int) -> bytes:
@@ -171,7 +213,7 @@ def normalize_to_slot(in_path: Path, slot_ms: int) -> Path:
 
 
 video_ms = video_duration_ms()
-print(f"[05] {len(cues_t)} cue, model={model}, fmt={fmt}, video_ms={video_ms}")
+print(f"[05] {len(cues_t)} 句, model={model}, fmt={fmt}, video_ms={video_ms}")
 
 MIN_SLOT_MS = 200
 kept: list[tuple[int, dict, int]] = []
@@ -179,41 +221,51 @@ for i, c in enumerate(cues_t):
     slot_end = cues_t[i + 1]["start_ms"] if i + 1 < len(cues_t) else video_ms
     slot_ms = max(slot_end - c["start_ms"], 0)
     if slot_ms < MIN_SLOT_MS:
-        print(f"[05] cue {i} 槽位过短（{slot_ms}ms），跳过")
+        print(f"[05] 句 {i} 槽位过短（{slot_ms}ms），跳过")
         continue
     kept.append((i, c, slot_ms))
 if not kept:
-    raise SystemExit("无可用 TTS cue（全部槽位过短）")
+    raise SystemExit("无可用 TTS 句（全部槽位过短）")
 
-# 兜底参考：最长 cue 的原声切片（短 cue / 切片失败时退用，保持同一说话人）
+# 兜底参考：最长的句子里挑一段参考（短句 / 切片失败时退用）
 backup_ref: tuple[str, str] | None = None
 try:
     longest = max(kept, key=lambda kc: kc[1]["end_ms"] - kc[1]["start_ms"])
-    ba = cut_reference_ms(longest[1]["start_ms"], longest[1]["end_ms"])
+    bs, be, btext = pick_ref_window(longest[1])
+    ba = cut_reference_ms(bs, be)
     if len(ba) >= MIN_REF_BYTES:
-        backup_ref = (base64.b64encode(ba).decode(), norm_text(longest[1]["text"]))
+        backup_ref = (base64.b64encode(ba).decode(), btext)
     else:
-        print(f"[05] 兜底参考过短（{len(ba)}B < {MIN_REF_BYTES}B），短 cue 无法兜底")
+        print(f"[05] 兜底参考过短（{len(ba)}B < {MIN_REF_BYTES}B），短句无法兜底")
 except Exception as e:  # noqa: BLE001
     print(f"[05] 兜底参考切片失败: {e}")
 
-# 逐 cue 准备参考音频（base64 + 原文字幕），切片过短/失败则退用兜底
+# 逐句准备参考音频（base64 + 对应片段原文），切片过短/失败则退用兜底
 refs: dict[int, tuple[str, str]] = {}
+ref_durs: list[float] = []
+fallbacks = 0
 for i, c, _ in kept:
+    s_ms, e_ms, ref_text = pick_ref_window(c)
     try:
-        audio = cut_reference_ms(c["start_ms"], c["end_ms"])
+        audio = cut_reference_ms(s_ms, e_ms)
         ok = len(audio) >= MIN_REF_BYTES
     except Exception as e:  # noqa: BLE001
-        print(f"[05] cue {i} 参考切片失败（{e}），退用兜底")
+        print(f"[05] 句 {i} 参考切片失败（{e}），退用兜底")
         ok = False
     if ok:
-        refs[i] = (base64.b64encode(audio).decode(), norm_text(c["text"]))
+        refs[i] = (base64.b64encode(audio).decode(), ref_text)
+        ref_durs.append((e_ms - s_ms) / 1000)
     elif backup_ref is not None:
         refs[i] = backup_ref
+        fallbacks += 1
     else:
-        raise SystemExit(f"cue {i} 参考音频不可用且无兜底（检查 vocals.wav 时长/切片）")
+        raise SystemExit(f"句 {i} 参考音频不可用且无兜底（检查 vocals.wav 时长/切片）")
+print(
+    f"[05] 参考窗口 {len(ref_durs)} 条，平均 {sum(ref_durs) / max(len(ref_durs), 1):.1f}s"
+    + (f"，兜底 {fallbacks} 条" if fallbacks else "")
+)
 
-# per-cue TTS：并发 8
+# per-sentence TTS：并发 8
 tts_dir = work / "tts"
 tts_dir.mkdir(exist_ok=True)
 tts_files: dict[int, Path] = {i: tts_dir / f"tts_{i:03d}.{fmt}" for i, _, _ in kept}

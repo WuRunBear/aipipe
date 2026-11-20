@@ -6,6 +6,7 @@
 cues 是后续翻译/TTS/烧录的唯一单元，每条含 start/end（VTT 时间字符串）
 与 text。下游 04 把时间字符串预解析为整数毫秒。
 """
+import html
 import json
 import os
 import re
@@ -13,6 +14,21 @@ from pathlib import Path
 
 work = Path("/work")
 target_lang = os.environ.get("PIPE_PARAM_TARGET_LANG", "zh")
+
+# YouTube 自动字幕的非语音/结构标记：换人 ">>"、笑声 [laughter]、音乐 [Music] 等
+NON_SPEECH_RE = re.compile(
+    r"\[(?:laughter|music|applause|inaudible|silence|noise)\]", re.IGNORECASE
+)
+SPEAKER_MARK_RE = re.compile(r"^\s*(?:&gt;){2}\s*|^\s*>>\s*")
+
+
+def clean_cue_line(line: str) -> str:
+    """HTML 反转义 + 去标签 + 去换人/非语音标记。"""
+    line = html.unescape(line)
+    line = re.sub(r"<[^>]+>", "", line)
+    line = NON_SPEECH_RE.sub("", line)
+    line = SPEAKER_MARK_RE.sub("", line)
+    return re.sub(r"\s+", " ", line).strip()
 
 
 def vtt_to_cues(vtt: str) -> list[dict]:
@@ -42,8 +58,9 @@ def vtt_to_cues(vtt: str) -> list[dict]:
             continue
         if line.startswith("Kind:") or line.startswith("Language:"):
             continue
-        line = re.sub(r"<[^>]+>", "", line)
-        buf.append(line)
+        line = clean_cue_line(line)
+        if line:
+            buf.append(line)
     if start is not None and buf:
         cues.append({"start": start, "end": end, "text": "\n".join(buf)})
     return cues
