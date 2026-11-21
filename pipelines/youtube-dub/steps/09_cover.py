@@ -146,9 +146,14 @@ def main() -> None:
 
     if not title.startswith(TITLE_PREFIX):
         title = TITLE_PREFIX + title.lstrip("[中配-附评论] ").strip()
-    if len(title) > 40 or "？" not in title or not any(k in title for k in KEY_TERMS):
-        topic = next((k for k in ["新雅尔塔", "雅尔塔", "三方会谈", "势力范围"] if k in lines[0] + lines[2]), "新雅尔塔")
-        title = f"{TITLE_PREFIX}外网媒体怎么看{topic}？真能重新划分势力范围吗？"
+    if (len(title) > 40 or "？" not in title or "真能" not in title
+            or not any(k in title for k in KEY_TERMS)):
+        joined = "".join(lines) + "".join(sentences)
+        topic = "新雅尔塔" if "雅尔塔" in joined else (
+            "势力范围" if "势力范围" in joined else "这场会谈")
+        subject = "三国领导人" if "三国领导人" in lines[1] else "他们"
+        action = "划分势力范围" if "势力范围" in joined else "改写世界格局"
+        title = f"{TITLE_PREFIX}外网媒体怎么看“{topic}”？{subject}真能{action}吗？"
     print(f"[09] 标题：{title}")
 
     # ---- 背景：缩略图优先，失败取视频中段 ----
@@ -196,12 +201,18 @@ def main() -> None:
     W, H = 1280, 720
     img = Image.open(bg).convert("RGB").resize((W, H), Image.LANCZOS)
     img = ImageEnhance.Brightness(img).enhance(0.55).convert("RGBA")
-    img = Image.alpha_composite(img, Image.new("RGBA", (W, H), (0, 0, 0, 110)))
+    # 顶部渐暗：压住缩略图左上角的英文标题，又不在中间留硬边
+    alpha = Image.new("L", (1, H))
+    for yy in range(H):
+        alpha.putpixel((0, yy), max(25, 205 - int(205 * yy / 480)))
+    black = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    black.putalpha(alpha.resize((W, H)))
+    img = Image.alpha_composite(img, black)
     draw = ImageDraw.Draw(img)
     font = ImageFont.truetype(
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 64, index=0
     )
-    y = 330
+    y = 150
     for line in lines:
         w = draw.textlength(line, font=font)
         x = (W - w) / 2
