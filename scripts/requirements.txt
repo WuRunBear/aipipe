@@ -1,0 +1,9 @@
+# scripts/clean_tag.py 的依赖（独立 venv，不与 server/requirements.txt 混装）
+#
+#   python3 -m venv .venv-waifuc
+#   .venv-waifuc/bin/pip install -r scripts/requirements.txt
+#
+# waifuc 没上 PyPI，只能从 git 装；@main 随上游走，需要固定版本时改成具体 commit。
+git+https://github.com/deepghs/waifuc.git@main
+# imgutils 的 tagging / detect / lpips 引擎；有 GPU 可换 onnxruntime-gpu（默认 CPU）
+onnxruntime>=1.17
