@@ -30,3 +30,4 @@ steps:
   - 06_merge.py
   - 07_comments.py
   - 08_outro.py
+  - 09_cover.py

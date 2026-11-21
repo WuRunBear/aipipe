@@ -1,4 +1,4 @@
-"""步骤 5/7：per-sentence TTS + 槽位归一化 → /work/dub.mp3。
+"""步骤 6/10：per-sentence TTS + 槽位归一化 → /work/dub.mp3。
 
 04 产出的单位已是完整句子；每句单独 TTS（可并发），以原声 vocals 为参考：
 arktts 零样本克隆，reference_audio_base64 取句内一段连续 cue 片段

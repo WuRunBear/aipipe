@@ -1,4 +1,4 @@
-"""步骤 6/6：ffmpeg 合成视频画面 + 配音 + 背景音 → /work/output.mp4。
+"""步骤 7/10：ffmpeg 合成视频画面 + 配音 + 背景音 → /work/output.mp4。
 
 三输入混音：[1:a]=dub(配音)，[2:a]=background(背景音，apad 补到视频时长)，
 按 dub_volume / bgm_volume 调整后 amix。

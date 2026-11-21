@@ -1,4 +1,4 @@
-"""步骤 4/7：句子级翻译 → /work/cues_translated.json + /work/translated.srt。
+"""步骤 5/10：句子级翻译 → /work/cues_translated.json + /work/translated.srt。
 
 输入 03b 产出的 sentences.json（每条已是完整句子），按批整句翻译；
 不再做"逐条翻译 + 事后合并"。产出的单位就是句：

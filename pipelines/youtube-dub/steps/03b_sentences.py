@@ -1,4 +1,4 @@
-"""步骤 3b/7：cue → 句子（标点原子化 + 确定性成句）→ /work/sentences.json。
+"""步骤 4/10：cue → 句子（标点原子化 + 确定性成句）→ /work/sentences.json。
 
 背景：先用 LLM 判断"相邻 cue 是否同句"，实测 deepseek-v3.2 / glm-5.3-flash
 在同一份数据上输出不稳定（同一 prompt 两次结果不同，且常把多条完整句并成
